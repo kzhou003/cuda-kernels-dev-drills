@@ -1,0 +1,45 @@
+{
+  "title": "CUDA Kernel 开发练习：从 Volta 到 Blackwell",
+  "brand": "CUDA Kernel 练习",
+  "kicker": "GEMM · FlashAttention · 每一代 GPU 的优化方式",
+  "lede": "18 道一小时练习：14 道在 CPU 上复刻每一代 NVIDIA GPU 的关键机制（mma.sync 布局、swizzle、cp.async 流水、mbarrier、TMA、warp specialization、TMEM、block scaling、Stream-K、PDL、FlashAttention 1→4），4 道在 RTX 5090 上写真实 CUDA kernel（Tensor Core GEMM、多级流水、FlashAttention-2、PDL + CUDA Graph）。做完之后，你能读懂 CUTLASS / FlashAttention 每一代的源码在做什么、为什么这么做。",
+  "lang": "zh",
+  "slug": "cuda-kernels-dev-drills",
+  "repo_url": "https://github.com/kzhou003/cuda-kernels-dev-drills",
+  "pins": {
+    "cutlass": {"repo": "NVIDIA/cutlass", "sha": "af951046cd9cac9301d8e3e90863fd8d7edc9fa9", "local": "~/development/_pins/cutlass"},
+    "fa": {"repo": "Dao-AILab/flash-attention", "sha": "dbabcc788590e793eee11566d7253906187e612e", "local": "~/development/_pins/flash-attention"},
+    "deepgemm": {"repo": "deepseek-ai/DeepGEMM", "sha": "5081f8513af57e61696de4f4f04b0e707ffb503e", "local": "~/development/_pins/DeepGEMM"},
+    "sglang": {"repo": "sgl-project/sglang", "sha": "97cd38e58d4c33a6cac002cd832e7e91c5b86e88", "local": "~/development/sglang"}
+  },
+  "tracks": [
+    {"id": "A", "title": "Track A · 算力账与 Tensor Core 的数据布局", "desc": "每一代要多大的 tile、warp 里谁拿哪个元素、SMEM 怎么摆才不冲突。所有代都用得上。"},
+    {"id": "B", "title": "Track B · Ampere → Hopper：异步搬运与同步", "desc": "cp.async 多级流水、mbarrier 相位与字节记账、TMA box 与 multicast、warp specialization。"},
+    {"id": "C", "title": "Track C · Blackwell 与 kernel 之间", "desc": "TMEM 累加器、FP8/FP4 block scaling、tile 调度与 Stream-K、CUDA Graph 与 PDL。"},
+    {"id": "D", "title": "Track D · FlashAttention 1 → 4 的算法", "desc": "online softmax 与 LSE 合并、FA2 的分块与 causal 跳块、FA4 的 exp2 多项式与条件 rescale。"},
+    {"id": "G", "title": "Track G · RTX 5090 实战（真实 CUDA）", "desc": "在 sm_120 上写 ldmatrix + mma.sync GEMM、cp.async 多级流水、FlashAttention-2 前向、PDL + CUDA Graph，并和 cuBLAS / SDPA 比速度。"}
+  ],
+  "drills": [
+    {"id": "A1", "stem": "a1_roofline_tiles", "title": "Roofline、tile 算术强度与寄存器 / SMEM 预算", "minutes": 35, "difficulty": "易", "track": "A", "given": ["GPU", "GPUS"]},
+    {"id": "A2", "stem": "a2_mma_fragments", "title": "mma.sync m16n8k16 的 fragment 布局与 ldmatrix", "minutes": 60, "difficulty": "中", "track": "A", "given": []},
+    {"id": "A3", "stem": "a3_bank_swizzle", "title": "SMEM bank conflict 与 CuTe Swizzle<B,M,S>", "minutes": 45, "difficulty": "中", "track": "A", "given": []},
+    {"id": "B1", "stem": "b1_cp_async_pipeline", "title": "cp.async 多级流水：commit / wait_group 与 K 循环时间线", "minutes": 50, "difficulty": "中", "track": "B", "given": []},
+    {"id": "B2", "stem": "b2_mbarrier_pipeline", "title": "mbarrier：相位位、事务字节与 TMA 生产者/消费者环", "minutes": 60, "difficulty": "难", "track": "B", "given": []},
+    {"id": "B3", "stem": "b3_tma_box_copy", "title": "TMA box 拷贝：越界填零、128B swizzle、cluster multicast", "minutes": 50, "difficulty": "中", "track": "B", "given": []},
+    {"id": "B4", "stem": "b4_warp_specialization", "title": "Warp specialization：Pingpong vs Cooperative 与 setmaxnreg", "minutes": 45, "difficulty": "中", "track": "B", "given": []},
+    {"id": "C1", "stem": "c1_tmem_accumulators", "title": "Blackwell TMEM：列分配、双缓冲累加器与 2-CTA MMA", "minutes": 45, "difficulty": "中", "track": "C", "given": []},
+    {"id": "C2", "stem": "c2_block_scaling", "title": "MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升", "minutes": 60, "difficulty": "难", "track": "C", "given": ["round_e4m3", "round_mantissa"]},
+    {"id": "C3", "stem": "c3_tile_scheduler", "title": "Tile 调度：wave quantization、raster swizzle、persistent、Stream-K", "minutes": 55, "difficulty": "中", "track": "C", "given": []},
+    {"id": "C4", "stem": "c4_launch_timeline", "title": "Kernel 之间：stream vs CUDA Graph vs PDL 的时间线与依赖", "minutes": 50, "difficulty": "中", "track": "C", "given": ["Kernel", "Costs"]},
+    {"id": "D1", "stem": "d1_online_softmax", "title": "Online softmax、(O, LSE) 状态与 split-KV 合并", "minutes": 45, "difficulty": "中", "track": "D", "given": []},
+    {"id": "D2", "stem": "d2_flash_forward", "title": "FlashAttention 前向分块：循环顺序、causal 跳块与 HBM 流量", "minutes": 55, "difficulty": "中", "track": "D", "given": []},
+    {"id": "D3", "stem": "d3_fa4_softmax_tricks", "title": "FA4 的 softmax：FMA 上的 exp2 多项式与条件 rescale", "minutes": 50, "difficulty": "中", "track": "D", "given": []},
+    {"id": "G1", "stem": "g1_mma_gemm", "title": "5090：ldmatrix + mma.sync 的 BF16 GEMM", "minutes": 75, "difficulty": "难", "track": "G", "given": ["gemm_mma"]},
+    {"id": "G2", "stem": "g2_multistage_gemm", "title": "5090：cp.async 多级流水 GEMM（2 / 3 / 4 级）", "minutes": 60, "difficulty": "难", "track": "G", "given": ["gemm_pipelined"]},
+    {"id": "G3", "stem": "g3_flash_attn", "title": "5090：FlashAttention-2 前向（mma.sync + online softmax）", "minutes": 90, "difficulty": "难", "track": "G", "given": ["flash_attn"]},
+    {"id": "G4", "stem": "g4_pdl_graph", "title": "5090：PDL + CUDA Graph，测出 kernel 之间省下的时间", "minutes": 60, "difficulty": "中", "track": "G", "given": ["run_chain"]}
+  ],
+  "knowledge": ["overview", "generations", "flash_attention", "between_kernels"],
+  "pdf": "cuda-kernels-dev-drills.pdf",
+  "quality": {"flows": 1, "steps": 1, "analogies": 1, "hints": 3}
+}

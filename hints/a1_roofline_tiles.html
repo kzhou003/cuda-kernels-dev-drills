@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A1 · Roofline、tile 算术强度与寄存器 / SMEM 预算</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cuda-kernels-dev-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">CUDA Kernel 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一个问题，五个部件，四代答案</a>
+<a class="nav-l3" href="../knowledge/generations.html">每一代 GPU：加了什么、为什么、代码怎么变</a>
+<a class="nav-l3" href="../knowledge/flash_attention.html">FlashAttention 1 → 4：同一个算法，为硬件改写四次</a>
+<a class="nav-l3" href="../knowledge/between_kernels.html">Kernel 之间：CUDA Graph、PDL、persistent 与编译器</a>
+<div class="nav-group">Track A · 算力账与 Tensor Core 的数据布局</div>
+<a class="nav-l3 cur" data-id="A1" href="../hints/a1_roofline_tiles.html"><span class="nid">A1</span>Roofline、tile 算术强度与寄存器 / SMEM 预算</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_mma_fragments.html"><span class="nid">A2</span>mma.sync m16n8k16 的 fragment 布局与 ldmatrix</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_bank_swizzle.html"><span class="nid">A3</span>SMEM bank conflict 与 CuTe Swizzle&lt;B,M,S&gt;</a>
+<div class="nav-group">Track B · Ampere → Hopper：异步搬运与同步</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_cp_async_pipeline.html"><span class="nid">B1</span>cp.async 多级流水：commit / wait_group 与 K 循环时间线</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_mbarrier_pipeline.html"><span class="nid">B2</span>mbarrier：相位位、事务字节与 TMA 生产者/消费者环</a>
+<a class="nav-l3" data-id="B3" href="../hints/b3_tma_box_copy.html"><span class="nid">B3</span>TMA box 拷贝：越界填零、128B swizzle、cluster multicast</a>
+<a class="nav-l3" data-id="B4" href="../hints/b4_warp_specialization.html"><span class="nid">B4</span>Warp specialization：Pingpong vs Cooperative 与 setmaxnreg</a>
+<div class="nav-group">Track C · Blackwell 与 kernel 之间</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_tmem_accumulators.html"><span class="nid">C1</span>Blackwell TMEM：列分配、双缓冲累加器与 2-CTA MMA</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_block_scaling.html"><span class="nid">C2</span>MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升</a>
+<a class="nav-l3" data-id="C3" href="../hints/c3_tile_scheduler.html"><span class="nid">C3</span>Tile 调度：wave quantization、raster swizzle、persistent、Stream-K</a>
+<a class="nav-l3" data-id="C4" href="../hints/c4_launch_timeline.html"><span class="nid">C4</span>Kernel 之间：stream vs CUDA Graph vs PDL 的时间线与依赖</a>
+<div class="nav-group">Track D · FlashAttention 1 → 4 的算法</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_online_softmax.html"><span class="nid">D1</span>Online softmax、(O, LSE) 状态与 split-KV 合并</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_flash_forward.html"><span class="nid">D2</span>FlashAttention 前向分块：循环顺序、causal 跳块与 HBM 流量</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_fa4_softmax_tricks.html"><span class="nid">D3</span>FA4 的 softmax：FMA 上的 exp2 多项式与条件 rescale</a>
+<div class="nav-group">Track G · RTX 5090 实战（真实 CUDA）</div>
+<a class="nav-l3" data-id="G1" href="../hints/g1_mma_gemm.html"><span class="nid">G1</span>5090：ldmatrix + mma.sync 的 BF16 GEMM</a>
+<a class="nav-l3" data-id="G2" href="../hints/g2_multistage_gemm.html"><span class="nid">G2</span>5090：cp.async 多级流水 GEMM（2 / 3 / 4 级）</a>
+<a class="nav-l3" data-id="G3" href="../hints/g3_flash_attn.html"><span class="nid">G3</span>5090：FlashAttention-2 前向（mma.sync + online softmax）</a>
+<a class="nav-l3" data-id="G4" href="../hints/g4_pdl_graph.html"><span class="nid">G4</span>5090：PDL + CUDA Graph，测出 kernel 之间省下的时间</a></nav>
+<main>
+<header class="cover"><div class="kicker">A1 · Track A · 算力账与 Tensor Core 的数据布局 · 35 分钟 · 易</div><h1>A1 · Roofline、tile 算术强度与寄存器 / SMEM 预算</h1><p class="lede">每一代 GPU 都在回答同一个问题：Tensor Core 又快了一倍，数据从哪来、tile 要多大才喂得饱它。先把这笔账算清楚，后面所有题目都在解决这笔账里的某一项。</p><p class="small">文件: <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/mine/a1_roofline_tiles.py"><code>mine/a1_roofline_tiles.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/tests/test_a1_roofline_tiles.py"><code>tests/test_a1_roofline_tiles.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/solutions/a1_roofline_tiles.py"><code>solutions/a1_roofline_tiles.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="A1"> 我已完成这道题</label></header>
+<h2 id="a1-1">题面速览</h2>
+<ul>
+<li><strong>在系统中的位置</strong>：CUTLASS 选 tile 形状（<code>TileShape</code>、<code>ClusterShape</code>）、FlashAttention 选块大小、调 occupancy 时，心里算的都是这几笔账。它们不在某个函数里，而是在每个 kernel 的模板参数里，例如 CUTLASS 例子 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/79_blackwell_geforce_gemm/79a_blackwell_geforce_nvfp4_bf16_gemm.cu#L121">79a 的 ThreadBlockShape</a>。</li>
+<li><strong>你要实现</strong>：<code>machine_balance</code>、<code>smem_balance</code>、<code>tile_intensity</code>、<code>gemm_intensity</code>、<code>attainable_tflops</code>、<code>smallest_feeding_tile</code>、<code>accumulator_regs_per_thread</code>、<code>ctas_per_sm</code>。规格表 <code>GPU</code> / <code>GPUS</code> 已经给出。</li>
+<li><strong>难点在这几条规则</strong>：
+<ol>
+<li>有<strong>两本账</strong>：整卡的“FLOP / HBM 字节”和每个 SM 的“FLOP / SMEM 字节”，后者决定 tile 最小多大。</li>
+<li>tile 每走一步 k 的强度是 <strong>面积 / 周长</strong>：<code>M·N / (M + N)</code>（BF16）。</li>
+<li>寄存器按 warp 分配，<strong>每线程向上取整到 8</strong>；超过 255 个就根本放不下。</li>
+<li>一个 SM 能放几个 CTA，是<strong>四个上限取最小</strong>：寄存器、SMEM、线程、CTA 个数。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：H100 机器平衡约 295 · SMEM 平衡 8/16/32/64、5090 是 4 · 64×64 → 32、128×256 → 85.3 · decode GEMV 强度约 1 · roofline 取最小 · 每代最小喂饱 tile · 累加器寄存器向上取整 · 33 个寄存器按 40 算 · 5090 每 CTA 最多 99 KB。</p>
+<h2 id="a1-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 厨房里的灶台和备菜台</div><p>Tensor Core 是一排猛火灶，SMEM 是灶台旁边的备菜台，HBM 是楼下的仓库。每一代灶台的火力翻倍（Tensor FLOP/clk），但备菜台和楼梯的宽度（SMEM 128 B/clk、HBM 带宽）几乎不变。想让灶不停火，只有一个办法：<strong>每拿一份菜，炒更多的盘子</strong>。一个 M×N 的 tile 就是一锅：拿一列 A（M 份）和一行 B（N 份），能炒 M·N 盘。锅越大越方，每份菜炒的盘子越多——这就是 <code>M·N / (M + N)</code>。代价是锅里装的东西（累加器）越来越多，最后连“手里”（寄存器）都端不住，Blackwell 只好专门造一个放锅的架子（TMEM）。</p>
+</div>
+<h2 id="a1-3">图解：两本账</h2>
+
+<figure class="flow"><div class="flow-head">一个 GEMM 的数据从哪来、在哪被重复用<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;一个 GEMM 的数据从哪来、在哪被重复用&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;hbm&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;HBM&quot;, &quot;s&quot;: &quot;H100 3.35 TB/s&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;l2&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;L2&quot;, &quot;s&quot;: &quot;跨 CTA 复用&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;smem&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;SMEM tile&quot;, &quot;s&quot;: &quot;每 SM 128 B/clk&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;tc&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Tensor Core&quot;, &quot;s&quot;: &quot;H100 4096 FLOP/clk/SM&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;acc&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;累加器&quot;, &quot;s&quot;: &quot;RF → TMEM&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;bal1&quot;, &quot;c&quot;: 0.5, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;整卡账：295&quot;, &quot;s&quot;: &quot;FLOP / HBM 字节&quot;, &quot;k&quot;: &quot;ghost&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;bal2&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;每 SM 账：32&quot;, &quot;s&quot;: &quot;FLOP / SMEM 字节&quot;, &quot;k&quot;: &quot;ghost&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;hbm&quot;, &quot;b&quot;: &quot;l2&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;l2&quot;, &quot;b&quot;: &quot;smem&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;smem&quot;, &quot;b&quot;: &quot;tc&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;tc&quot;, &quot;b&quot;: &quot;acc&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 210.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 176.0}}"></div><figcaption>L2 → SMEM 靠 <code>cp.async</code> / TMA，SMEM → Tensor Core 靠 <code>ldmatrix</code> / wgmma 描述符。整卡账决定 kernel 是不是 memory-bound（<code>gemm_intensity</code> vs <code>machine_balance</code>）；每 SM 账决定 tile 最小多大（<code>tile_intensity</code> vs <code>smem_balance</code>）。累加器随 tile 面积增长，是第三本账（寄存器 / TMEM）。</figcaption></figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>GPU</th>
+<th>峰值 BF16 TF/s</th>
+<th>FLOP / HBM 字节</th>
+<th>FLOP / SMEM 字节</th>
+<th>最小喂饱 tile（候选里）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>V100</td>
+<td>125.3</td>
+<td>139.3</td>
+<td>8</td>
+<td>16×16</td>
+</tr>
+<tr>
+<td>A100</td>
+<td>311.9</td>
+<td>153.0</td>
+<td>16</td>
+<td>32×32</td>
+</tr>
+<tr>
+<td>H100</td>
+<td>989.4</td>
+<td>295.4</td>
+<td>32</td>
+<td>64×64</td>
+</tr>
+<tr>
+<td>B200</td>
+<td>2255.1</td>
+<td>281.9</td>
+<td>64</td>
+<td>128×128</td>
+</tr>
+<tr>
+<td>RTX 5090</td>
+<td>209.8</td>
+<td>117.1</td>
+<td>4</td>
+<td>8×8</td>
+</tr>
+</tbody>
+</table></div>
+<p>（数字由参考解算出；峰值按公版 boost 时钟反推，实测时钟往往更高。）RTX 5090 这一行很重要：GeForce 的 FP32 累加 Tensor Core 吞吐只有 H100 的约 1/5，所以<strong>在 5090 上 Ampere 风格的 <code>mma.sync</code> 依然够用</strong>，这也是 G 题能在 5090 上跑到 cuBLAS 九成的原因。</p>
+<h2 id="a1-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 从 V100 到 B200：tile 怎么一步步变大</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;v&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;V100 · 8&quot;, &quot;s&quot;: &quot;warp tile 够了&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;A100 · 16&quot;, &quot;s&quot;: &quot;64×64 → 32&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;h&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;H100 · 32&quot;, &quot;s&quot;: &quot;64×256 → 51&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;b&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;B200 · 64&quot;, &quot;s&quot;: &quot;128×256 → 85&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;p&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;2-CTA 256×256&quot;, &quot;s&quot;: &quot;每 SM 128&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;v&quot;, &quot;b&quot;: &quot;a&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;a&quot;, &quot;b&quot;: &quot;h&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;h&quot;, &quot;b&quot;: &quot;b&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;b&quot;, &quot;b&quot;: &quot;p&quot;, &quot;t&quot;: &quot;累加器放不下&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 190.0, &quot;rh&quot;: 112.0, &quot;nw&quot;: 160.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="v"><div class="step-title">1. V100：8 FLOP/字节</div><p>一个 warp 的 64×64 tile 强度 32，远超需要。瓶颈不在 SMEM，而在“搬运占线程”。</p>
+</div><div class="step" data-hl="a"><div class="step-title">2. A100：16</div><p>64×64 的 warp tile 仍然够（32 ≥ 16）。问题转向延迟：<code>cp.async</code> 多级流水（B1、G2）。</p>
+</div><div class="step" data-hl="a,h"><div class="step-title">3. H100：32</div><p>64×64 刚好 32，再加上 epilogue、地址计算就不够了。<code>wgmma</code> 让一个 warpgroup 共享 64×256 的 B（51.2）。累加器 64×256 FP32 = 每线程 128 个寄存器（<code>accumulator_regs_per_thread(64, 256, 128)</code>）。</p>
+</div><div class="step" data-hl="h,b"><div class="step-title">4. B200：64</div><p>要 128×128 以上。128×256 的累加器每线程 256 个寄存器 &gt; 255：<strong>放不下</strong>。于是有了 TMEM（C1）。</p>
+</div><div class="step" data-hl="b,p"><div class="step-title">5. 2-CTA：每 SM 128</div><p>两个 SM 合算 256×256，每个 SM 只装一半 B：每 SM 强度 128，是 B200 需要的两倍，留出余量给 epilogue 和尾 tile。</p>
+</div></div></div>
+<h2 id="a1-5">易错点</h2>
+<ul>
+<li><strong>用 <code>M·N / (M + N)</code> 却忘了字节数。</strong> FP8 的操作数只有 1 字节，同样的 tile 强度翻倍；通用公式是 <code>2·M·N / ((M+N)·elem_bytes)</code>。测试 <code>test_tile_intensity_matches_area_over_perimeter</code> 会检查 FP8。</li>
+<li><strong>寄存器不按 8 取整。</strong> 33 个寄存器实际按 40 分配，A100 上 256 线程的 CTA 从 8 个掉到 6 个。<code>test_ctas_per_sm_register_granularity</code> 抓这个。</li>
+<li><strong>忘了 SMEM 每 CTA 上限。</strong> 5090 每 SM 100 KB，但每 CTA 最多 99 KB；超过直接是 0 个 CTA（launch 失败），而不是“少放几个”。</li>
+<li><strong>把 <code>smem_per_cta == 0</code> 当成除零。</strong> 不用 SMEM 的 kernel 不受 SMEM 限制。</li>
+<li><strong>面积相同不按 M 排序。</strong> 题面规定 tie 时 M 小的优先，测试会检查 <code>(64,128)</code> vs <code>(128,64)</code>。</li>
+</ul>
+<h2 id="a1-6">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 示例与关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">H = GPUS[&quot;H100&quot;]
+machine_balance(H)            # 295.4
+smem_balance(H)               # 32.0
+tile_intensity(128, 256)      # 85.33
+gemm_intensity(1, 4096, 4096) # 1.0   decode 的 GEMV
+attainable_tflops(H, 1.0)     # 3.35
+ctas_per_sm(GPUS[&quot;RTX5090&quot;], 256, 128, 40960)   # 2
+ctas_per_sm(GPUS[&quot;RTX5090&quot;], 256, 128, 61440)   # 1
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>一步 k 读多少字节、做多少 FLOP？</li>
+<li>为什么 decode（M = 1）的 GEMM 不管怎么写都是 memory-bound？</li>
+<li>寄存器为什么是“每 warp 256 个”的粒度，而不是每线程 1 个？</li>
+<li>G2 里 3 级流水（60 KB SMEM）为什么在 5090 上比 2 级（40 KB）慢？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li>先写 <code>peak = num_sms · clock · tc_flops_per_clk_per_sm</code>（<code>GPU.peak_tflops</code> 已给出）。</li>
+<li><code>tile_intensity</code>：分子 <code>2·M·N</code>，分母 <code>(M+N)·elem_bytes</code>。</li>
+<li><code>smallest_feeding_tile</code>：<code>sorted(candidates, key=lambda t: (t[0]*t[1], t[0]))</code>，找第一个 ≥ <code>smem_balance</code> 的。</li>
+<li><code>ctas_per_sm</code>：先处理两个“直接 0”的情况（&gt;255 寄存器、超过每 CTA SMEM 上限），再算四个上限取 <code>min</code>。</li>
+<li>每 warp 寄存器 = <code>ceil(regs/8)·8·32</code>；CTA 的 warp 数 = <code>ceil(threads/32)</code>。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>详解：答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>关键问题答案</summary><div class="body"><ol>
+<li>读 A 的一列 M 个、B 的一行 N 个元素，共 <code>(M+N)·elem_bytes</code> 字节；做 M·N 次乘加 = <code>2·M·N</code> FLOP。</li>
+<li>M = 1 时每个权重元素只被用一次：强度约 1 FLOP/字节，H100 上最多 3.35 TF/s，是峰值的 0.3%。所以 decode 要么批大（M 变大），要么靠 FP8/FP4 权重减字节，要么靠 kernel 之间少停顿（C4、G4）。</li>
+<li>寄存器堆按 warp 分配（每个 warp 是一个整体调度单位），硬件分配粒度是 256 个寄存器 = 每线程 8 个。</li>
+<li>5090 每 SM 只有 100 KB SMEM：60 KB 的 CTA 只能放 1 个，40 KB 能放 2 个（<code>ctas_per_sm</code> 给出 1 和 2）。5090 的 Tensor Core 不快，2 个 CTA 交替就能藏住延迟；3–4 级流水换来的是 occupancy 减半。G2 的 bench 正好能看到这个：2 级约 0.9× cuBLAS，3/4 级约 0.8×。</li>
+</ol>
+</div></details></div></details>
+<h2 id="a1-7">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/a1_roofline_tiles.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/a1_roofline_tiles.py</span><span class="muted small">148 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;A1 · Roofline, tile arithmetic intensity and the register / SMEM budget — reference solution.
+
+每一代 GPU 的 Tensor Core 都比上一代快一倍，但 HBM 和 SMEM 带宽涨得慢得多。这道题把
+“需要多大的 tile 才喂得饱 Tensor Core”算清楚：CUTLASS / cuBLAS 选 tile 形状、FA 选块大小时
+心里算的就是这几笔账。
+
+- machine_balance(gpu): 峰值 Tensor FLOP/s ÷ HBM 字节/s（FLOP/byte）。
+- smem_balance(gpu): 每 SM 每时钟 Tensor FLOP ÷ 每 SM 每时钟 SMEM 字节（gpu.smem_bytes_per_clk）。
+- tile_intensity(M, N, elem_bytes=2): 一个 M×N 输出 tile 每走一步 k 的强度
+  = 2·M·N FLOP ÷ ((M + N)·elem_bytes) 字节。
+- gemm_intensity(M, N, K, elem_bytes=2, out_bytes=2): 整个 GEMM 在“每个元素只读写一次”的理想情况下
+  = 2·M·N·K ÷ (elem_bytes·(M·K + K·N) + out_bytes·M·N)。
+- attainable_tflops(gpu, intensity): roofline = min(峰值, intensity × HBM 带宽)，单位 TFLOP/s。
+- smallest_feeding_tile(gpu, candidates, elem_bytes=2): 在 candidates（(M, N) 列表）里按面积 M·N
+  从小到大（面积相同按 M 小的优先）找第一个 tile_intensity ≥ smem_balance(gpu) 的；没有返回 None。
+- accumulator_regs_per_thread(M, N, threads, acc_bytes=4): FP32 累加器平均到每个线程要几个 32-bit 寄存器
+  = ceil(M·N·acc_bytes / 4 / threads)。
+- ctas_per_sm(gpu, threads_per_cta, regs_per_thread, smem_per_cta): 一个 SM 同时能驻留几个 CTA，
+  取下面四个上限的最小值：
+    寄存器：每个 warp 的寄存器按 regs_per_thread 先向上取整到 8 的倍数再 ×32，
+            CTA 的 warp 数 = ceil(threads/32)；上限 = gpu.regs_per_sm // (warps × 每 warp 寄存器)；
+    SMEM：smem_per_cta &gt; gpu.smem_per_cta_max 时返回 0；smem_per_cta == 0 时不受限；
+          否则上限 = gpu.smem_per_sm // smem_per_cta；
+    线程：gpu.max_threads_per_sm // threads_per_cta；
+    CTA 数：gpu.max_ctas_per_sm。
+  regs_per_thread &gt; 255 时返回 0（编译器会 spill，硬件不允许）。
+
+API
+    GPU, GPUS                                              given：规格表
+    machine_balance(gpu) -&gt; float
+    smem_balance(gpu) -&gt; float
+    tile_intensity(M, N, elem_bytes=2) -&gt; float
+    gemm_intensity(M, N, K, elem_bytes=2, out_bytes=2) -&gt; float
+    attainable_tflops(gpu, intensity) -&gt; float
+    smallest_feeding_tile(gpu, candidates, elem_bytes=2) -&gt; tuple[int, int] | None
+    accumulator_regs_per_thread(M, N, threads, acc_bytes=4) -&gt; int
+    ctas_per_sm(gpu, threads_per_cta, regs_per_thread, smem_per_cta) -&gt; int
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class GPU:
+    &quot;&quot;&quot;一代 GPU 的关键规格（SXM / 公版，dense BF16 Tensor Core，FP32 累加）。
+
+    tc_flops_per_clk_per_sm 由“峰值 ÷ (SM 数 × boost 时钟)”反推，取整到 2 的幂；
+    smem_bytes_per_clk 是每 SM 每时钟的 SMEM 带宽（这几代都是 128 B）。
+    &quot;&quot;&quot;
+    name: str
+    sm: str
+    num_sms: int
+    clock_ghz: float
+    tc_flops_per_clk_per_sm: int
+    hbm_gbps: float
+    smem_bytes_per_clk: int = 128
+    regs_per_sm: int = 65536
+    smem_per_sm: int = 0          # bytes
+    smem_per_cta_max: int = 0     # bytes
+    max_threads_per_sm: int = 2048
+    max_ctas_per_sm: int = 32
+
+    @property
+    def peak_tflops(self) -&gt; float:
+        return self.num_sms * self.clock_ghz * 1e9 * self.tc_flops_per_clk_per_sm / 1e12
+
+
+GPUS = {
+    &quot;V100&quot;: GPU(&quot;V100&quot;, &quot;sm70&quot;, 80, 1.53, 1024, 900, smem_per_sm=96 * 1024, smem_per_cta_max=96 * 1024),
+    &quot;A100&quot;: GPU(&quot;A100&quot;, &quot;sm80&quot;, 108, 1.41, 2048, 2039, smem_per_sm=164 * 1024, smem_per_cta_max=163 * 1024),
+    &quot;H100&quot;: GPU(&quot;H100&quot;, &quot;sm90a&quot;, 132, 1.83, 4096, 3350, smem_per_sm=228 * 1024, smem_per_cta_max=227 * 1024),
+    &quot;B200&quot;: GPU(&quot;B200&quot;, &quot;sm100a&quot;, 148, 1.86, 8192, 8000, smem_per_sm=228 * 1024, smem_per_cta_max=227 * 1024),
+    &quot;RTX5090&quot;: GPU(&quot;RTX5090&quot;, &quot;sm120&quot;, 170, 2.41, 512, 1792, smem_per_sm=100 * 1024, smem_per_cta_max=99 * 1024,
+                   max_threads_per_sm=1536),
+}
+
+
+def machine_balance(gpu: GPU) -&gt; float:
+    &quot;&quot;&quot;峰值 Tensor FLOP/s ÷ HBM 字节/s。kernel 的强度低于它就是 memory-bound。&quot;&quot;&quot;
+    # H100: 989 TF / 3.35 TB/s ≈ 295 FLOP/byte。这是“整卡”的账：数据从 HBM 来一次，
+    # 在片上要被用 295 次才不浪费 Tensor Core。
+    return gpu.peak_tflops * 1e12 / (gpu.hbm_gbps * 1e9)
+
+
+def smem_balance(gpu: GPU) -&gt; float:
+    &quot;&quot;&quot;每 SM 每时钟 Tensor FLOP ÷ 每 SM 每时钟 SMEM 字节。&quot;&quot;&quot;
+    # 这是“每个 SM”的账：操作数从 SMEM 读进 Tensor Core，每个字节要被用多少次。
+    # V100 8 → A100 16 → H100 32 → B200 64，每代翻倍，因为 SMEM 带宽一直是 128 B/clk。
+    # RTX 5090 只有 4：GeForce 的 FP32 累加 Tensor Core 吞吐只有数据中心卡的几分之一，
+    # 所以在 5090 上小 tile 也能喂饱它——这也是为什么 mma.sync 在 5090 上依然够用。
+    return gpu.tc_flops_per_clk_per_sm / gpu.smem_bytes_per_clk
+
+
+def tile_intensity(M: int, N: int, elem_bytes: int = 2) -&gt; float:
+    &quot;&quot;&quot;M×N 输出 tile 每走一步 k：2·M·N FLOP ÷ (M + N)·elem_bytes 字节。&quot;&quot;&quot;
+    # 一步 k 读 A 的一列（M 个元素）和 B 的一行（N 个元素），做 M·N 次乘加。
+    # 面积 / 周长：tile 越接近方形、越大，强度越高。
+    return 2 * M * N / ((M + N) * elem_bytes)
+
+
+def gemm_intensity(M: int, N: int, K: int, elem_bytes: int = 2, out_bytes: int = 2) -&gt; float:
+    &quot;&quot;&quot;整个 GEMM 的理想强度（A、B 各读一次，C 写一次）。&quot;&quot;&quot;
+    # 理想情况，现实中 A/B 会被不同 CTA 重复读，L2 命中率决定离理想有多远（C3 的 raster swizzle）。
+    flops = 2 * M * N * K
+    bytes_ = elem_bytes * (M * K + K * N) + out_bytes * M * N
+    return flops / bytes_
+
+
+def attainable_tflops(gpu: GPU, intensity: float) -&gt; float:
+    &quot;&quot;&quot;roofline：min(峰值, 强度 × HBM 带宽)，TFLOP/s。&quot;&quot;&quot;
+    return min(gpu.peak_tflops, intensity * gpu.hbm_gbps * 1e9 / 1e12)
+
+
+def smallest_feeding_tile(gpu: GPU, candidates, elem_bytes: int = 2):
+    &quot;&quot;&quot;按面积从小到大找第一个强度 ≥ smem_balance 的 tile；都不行返回 None。&quot;&quot;&quot;
+    # 为什么要“最小”的那个：tile 越大，累加器越多（寄存器 / TMEM 压力），
+    # 而且 M、N 不整除时浪费越多（尾 tile），所以只要喂得饱就不再加大。
+    need = smem_balance(gpu)
+    for M, N in sorted(candidates, key=lambda t: (t[0] * t[1], t[0])):
+        if tile_intensity(M, N, elem_bytes) &gt;= need:
+            return (M, N)
+    return None
+
+
+def accumulator_regs_per_thread(M: int, N: int, threads: int, acc_bytes: int = 4) -&gt; int:
+    &quot;&quot;&quot;FP32 累加器平均到每个线程的 32-bit 寄存器数（向上取整）。&quot;&quot;&quot;
+    # 128×256 的 FP32 累加器 = 128 KB = 半个寄存器堆。分给一个 warpgroup（128 线程）
+    # 就是每线程 256 个寄存器——超过 255 的上限，所以 Hopper 要两个 consumer warpgroup 分，
+    # Blackwell 干脆把累加器搬进 TMEM。
+    return math.ceil(M * N * acc_bytes / 4 / threads)
+
+
+def ctas_per_sm(gpu: GPU, threads_per_cta: int, regs_per_thread: int, smem_per_cta: int) -&gt; int:
+    &quot;&quot;&quot;一个 SM 能同时驻留的 CTA 数（寄存器 / SMEM / 线程 / CTA 四个上限取最小）。&quot;&quot;&quot;
+    if regs_per_thread &gt; 255:
+        return 0
+    if smem_per_cta &gt; gpu.smem_per_cta_max:
+        return 0
+    warps = math.ceil(threads_per_cta / 32)
+    # 寄存器按 warp 分配，粒度 256 个（= 每线程 8 个）。所以 regs=33 实际按 40 算——
+    # 这是“我只多用了 1 个寄存器，occupancy 怎么掉了”的常见原因。
+    regs_per_warp = math.ceil(regs_per_thread / 8) * 8 * 32
+    by_regs = gpu.regs_per_sm // (warps * regs_per_warp) if regs_per_warp else gpu.max_ctas_per_sm
+    by_smem = gpu.smem_per_sm // smem_per_cta if smem_per_cta else gpu.max_ctas_per_sm
+    by_threads = gpu.max_threads_per_sm // threads_per_cta
+    return min(by_regs, by_smem, by_threads, gpu.max_ctas_per_sm)</code></pre></div></div></details>
+<h2 id="a1-8">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li><strong>“H100 上一个 bf16 GEMM 的 M = N = K = 4096，理论上是不是 compute-bound？”</strong> <code>gemm_intensity</code> ≈ 1365 ≫ 295，是。但如果 tile 太小、L2 命中差，实际从 HBM 读的远多于理想值——这就是 C3 的 raster swizzle 要解决的。</li>
+<li><strong>“FP8 GEMM 的 tile 为什么可以小一些？”</strong> 操作数字节减半，同样 tile 强度翻倍；但 Tensor Core 吞吐也翻倍，所以需要的 tile 其实差不多。</li>
+<li><strong>“Blackwell 2-CTA MMA 是怎么省 SMEM 带宽的？”</strong> 见 C1 的 <code>per_sm_intensity</code> 和 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/mma_sm100_umma.hpp#L552">SM100_MMA_F16BF16_2x1SM_SS</a>（<code>cta_group::2</code>）。</li>
+<li><strong>“Hopper 怎么在 warpgroup 之间挪寄存器？”</strong> <code>setmaxnreg</code>，见 B4 和 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/reg_reconfig.h#L83">warpgroup_reg_alloc</a>。</li>
+<li><strong>“5090 上的 TMEM / wgmma 呢？”</strong> sm120 没有：MMA 仍是 warp 级 <code>mma.sync</code>（加了 FP4/FP6/FP8 block scale），见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/mma_sm120.hpp#L45">SM120_16x8x32_TN</a>。</li>
+</ul>
+
+<nav class="pager"><span></span><a href="a2_mma_fragments.html">A2 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#a1-1">题面速览</a>
+<a class="o2" href="#a1-2">直觉与类比</a>
+<a class="o2" href="#a1-3">图解：两本账</a>
+<a class="o2" href="#a1-4">逐步演示</a>
+<a class="o2" href="#a1-5">易错点</a>
+<a class="o2" href="#a1-6">三级提示</a>
+<a class="o2" href="#a1-7">参考解</a>
+<a class="o2" href="#a1-8">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

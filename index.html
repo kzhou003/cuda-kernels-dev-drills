@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CUDA Kernel 开发练习：从 Volta 到 Blackwell</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cuda-kernels-dev-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="index.html">CUDA Kernel 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="knowledge/overview.html">总览：一个问题，五个部件，四代答案</a>
+<a class="nav-l3" href="knowledge/generations.html">每一代 GPU：加了什么、为什么、代码怎么变</a>
+<a class="nav-l3" href="knowledge/flash_attention.html">FlashAttention 1 → 4：同一个算法，为硬件改写四次</a>
+<a class="nav-l3" href="knowledge/between_kernels.html">Kernel 之间：CUDA Graph、PDL、persistent 与编译器</a>
+<div class="nav-group">Track A · 算力账与 Tensor Core 的数据布局</div>
+<a class="nav-l3" data-id="A1" href="hints/a1_roofline_tiles.html"><span class="nid">A1</span>Roofline、tile 算术强度与寄存器 / SMEM 预算</a>
+<a class="nav-l3" data-id="A2" href="hints/a2_mma_fragments.html"><span class="nid">A2</span>mma.sync m16n8k16 的 fragment 布局与 ldmatrix</a>
+<a class="nav-l3" data-id="A3" href="hints/a3_bank_swizzle.html"><span class="nid">A3</span>SMEM bank conflict 与 CuTe Swizzle&lt;B,M,S&gt;</a>
+<div class="nav-group">Track B · Ampere → Hopper：异步搬运与同步</div>
+<a class="nav-l3" data-id="B1" href="hints/b1_cp_async_pipeline.html"><span class="nid">B1</span>cp.async 多级流水：commit / wait_group 与 K 循环时间线</a>
+<a class="nav-l3" data-id="B2" href="hints/b2_mbarrier_pipeline.html"><span class="nid">B2</span>mbarrier：相位位、事务字节与 TMA 生产者/消费者环</a>
+<a class="nav-l3" data-id="B3" href="hints/b3_tma_box_copy.html"><span class="nid">B3</span>TMA box 拷贝：越界填零、128B swizzle、cluster multicast</a>
+<a class="nav-l3" data-id="B4" href="hints/b4_warp_specialization.html"><span class="nid">B4</span>Warp specialization：Pingpong vs Cooperative 与 setmaxnreg</a>
+<div class="nav-group">Track C · Blackwell 与 kernel 之间</div>
+<a class="nav-l3" data-id="C1" href="hints/c1_tmem_accumulators.html"><span class="nid">C1</span>Blackwell TMEM：列分配、双缓冲累加器与 2-CTA MMA</a>
+<a class="nav-l3" data-id="C2" href="hints/c2_block_scaling.html"><span class="nid">C2</span>MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升</a>
+<a class="nav-l3" data-id="C3" href="hints/c3_tile_scheduler.html"><span class="nid">C3</span>Tile 调度：wave quantization、raster swizzle、persistent、Stream-K</a>
+<a class="nav-l3" data-id="C4" href="hints/c4_launch_timeline.html"><span class="nid">C4</span>Kernel 之间：stream vs CUDA Graph vs PDL 的时间线与依赖</a>
+<div class="nav-group">Track D · FlashAttention 1 → 4 的算法</div>
+<a class="nav-l3" data-id="D1" href="hints/d1_online_softmax.html"><span class="nid">D1</span>Online softmax、(O, LSE) 状态与 split-KV 合并</a>
+<a class="nav-l3" data-id="D2" href="hints/d2_flash_forward.html"><span class="nid">D2</span>FlashAttention 前向分块：循环顺序、causal 跳块与 HBM 流量</a>
+<a class="nav-l3" data-id="D3" href="hints/d3_fa4_softmax_tricks.html"><span class="nid">D3</span>FA4 的 softmax：FMA 上的 exp2 多项式与条件 rescale</a>
+<div class="nav-group">Track G · RTX 5090 实战（真实 CUDA）</div>
+<a class="nav-l3" data-id="G1" href="hints/g1_mma_gemm.html"><span class="nid">G1</span>5090：ldmatrix + mma.sync 的 BF16 GEMM</a>
+<a class="nav-l3" data-id="G2" href="hints/g2_multistage_gemm.html"><span class="nid">G2</span>5090：cp.async 多级流水 GEMM（2 / 3 / 4 级）</a>
+<a class="nav-l3" data-id="G3" href="hints/g3_flash_attn.html"><span class="nid">G3</span>5090：FlashAttention-2 前向（mma.sync + online softmax）</a>
+<a class="nav-l3" data-id="G4" href="hints/g4_pdl_graph.html"><span class="nid">G4</span>5090：PDL + CUDA Graph，测出 kernel 之间省下的时间</a></nav>
+<main>
+<header class="cover"><div class="kicker">GEMM · FlashAttention · 每一代 GPU 的优化方式 · 18 × · 990 分钟</div><h1>CUDA Kernel 开发练习：从 Volta 到 Blackwell</h1><p class="lede">18 道一小时练习：14 道在 CPU 上复刻每一代 NVIDIA GPU 的关键机制（mma.sync 布局、swizzle、cp.async 流水、mbarrier、TMA、warp specialization、TMEM、block scaling、Stream-K、PDL、FlashAttention 1→4），4 道在 RTX 5090 上写真实 CUDA kernel（Tensor Core GEMM、多级流水、FlashAttention-2、PDL + CUDA Graph）。做完之后，你能读懂 CUTLASS / FlashAttention 每一代的源码在做什么、为什么这么做。</p></header>
+<h2 id="h-1">怎么用</h2>
+<p>每道题一小时左右：读讲解页（5–10 分钟）→ 在 <code>mine/</code> 里实现 → <code>./check.sh &lt;编号&gt;</code> → 卡住 10–15 分钟再按 L1 → L2 → L3 看提示 → 对照参考解和“面试官追问”。</p>
+<pre><code class="language-bash">git clone https://github.com/kzhou003/cuda-kernels-dev-drills &amp;&amp; cd cuda-kernels-dev-drills
+./check.sh a1                 # 第一次会建 .venv（pytest + numpy），测你的 mine/a1_*.py
+./check.sh a1 --solutions     # 测参考解
+./check.sh all                # 全部（没有 GPU 时 G 题自动跳过）
+</code></pre>
+<h2 id="h-2">环境</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>题目</th>
+<th>需要什么</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A、B、C、D（14 道）</td>
+<td>Python 3.10+、numpy、pytest</td>
+<td>只用 CPU，整套几秒跑完</td>
+</tr>
+<tr>
+<td>G1、G2、G3</td>
+<td>NVIDIA GPU sm_80+、带 CUDA 的 torch、nvcc</td>
+<td><strong>默认在 RTX 5090（sm_120）上测</strong>；A100 / H100 / RTX 30/40 也能跑</td>
+</tr>
+<tr>
+<td>G4</td>
+<td>sm_90+（PDL）</td>
+<td>RTX 5090、H100、B200</td>
+</tr>
+</tbody>
+</table></div>
+<p>GPU 题用 <code>torch.utils.cpp_extension.load_inline</code> 编译 <code>mine/&lt;题&gt;.cu</code>，第一次 30–60 秒，之后有缓存。用一个装了 CUDA 版 torch 的 Python：</p>
+<pre><code class="language-bash">python3 -m venv --system-site-packages .venv-gpu &amp;&amp; .venv-gpu/bin/pip install pytest numpy
+export CUDA_HOME=/usr/local/cuda PATH=$CUDA_HOME/bin:$PATH     # nvcc 版本要和 torch 的 CUDA 版本兼容
+PYTHON=.venv-gpu/bin/python ./check.sh g1
+PYTHON=.venv-gpu/bin/python ./check.sh g2 --bench --solutions   # 和 cuBLAS / SDPA 比速度
+</code></pre>
+<p>GPU 题的骨架里有一行 <code>#define DRILL_STUB</code>：留着它时测试直接报 <code>NotImplementedError</code>，开始写之前删掉。</p>
+<p><strong>5090 上跑不了的</strong>：wgmma、TMA multicast、<code>setmaxnreg</code>（需 H100，sm_90a），tcgen05 / TMEM / 2-CTA MMA / Cluster Launch Control（需 B200，sm_100a）。对应的 B3、B4、C1、C3 的 CLC 部分、D3 是 CPU 模型；每道题的讲解页写明了需要哪张卡才能真跑，以及 CUTLASS / FlashAttention 里对应的源码。</p>
+<h2 id="h-3">建议顺序</h2>
+<p>规则（CPU 题）和代码（GPU 题）交替做：</p>
+<ol>
+<li><strong>A1</strong> 算账 → <strong>A2</strong> fragment 布局 → <strong>G1</strong> 5090 上的 mma.sync GEMM</li>
+<li><strong>A3</strong> swizzle → <strong>B1</strong> cp.async 流水 → <strong>G2</strong> 多级流水 GEMM</li>
+<li><strong>B2</strong> mbarrier → <strong>B3</strong> TMA → <strong>B4</strong> warp specialization（Hopper）</li>
+<li><strong>C1</strong> TMEM（Blackwell）→ <strong>C2</strong> block scaling → <strong>C3</strong> tile 调度</li>
+<li><strong>D1</strong> online softmax → <strong>D2</strong> FA 分块 → <strong>G3</strong> 5090 上的 FlashAttention-2 → <strong>D3</strong> FA4 的技巧</li>
+<li><strong>C4</strong> kernel 之间的时间线 → <strong>G4</strong> 5090 上实测 PDL + CUDA Graph</li>
+</ol>
+<p>依赖：G1 用到 A2；G2 用到 B1、G1；G3 用到 A2、D1、D2；G4 用到 C4；B4、C1 用到 B2。</p>
+<p>先读知识页 <strong>总览</strong>，再读 <strong>每一代 GPU</strong>；做 D 题前读 <strong>FlashAttention 1 → 4</strong>，做 C4 / G4 前读 <strong>Kernel 之间</strong>。</p>
+
+<h2 id="h-4">领域知识</h2><div class="cards"><a class="card" href="knowledge/overview.html"><div class="ctitle">总览：一个问题，五个部件，四代答案</div><div class="cmeta">这套练习在练什么：每一代 NVIDIA GPU 都让 Tensor Core 快一倍，而数据供给跟不上。几乎所有新特性都在回答同一个问题——怎么让更快的矩阵单元不挨饿。GEMM 和 FlashAttention 是两条贯穿始终的主线。</div></a><a class="card" href="knowledge/generations.html"><div class="ctitle">每一代 GPU：加了什么、为什么、代码怎么变</div><div class="cmeta">从 Volta 到 Blackwell，每一代加了哪几样东西、为什么加、kernel 代码因此怎么变。读完这一页，再看 CUTLASS 里 sm80 / sm90 / sm100 三个目录为什么长得完全不一样。</div></a><a class="card" href="knowledge/flash_attention.html"><div class="ctitle">FlashAttention 1 → 4：同一个算法，为硬件改写四次</div><div class="cmeta">FlashAttention 1 → 4 算的是同一件事：Q 块留在片上，K/V 一块块流过，online softmax 递推，S 和 P 从不落 HBM。四个版本的区别，是这个递推怎么映射到每一代的硬件上。</div></a><a class="card" href="knowledge/between_kernels.html"><div class="ctitle">Kernel 之间：CUDA Graph、PDL、persistent 与编译器</div><div class="cmeta">PDL、CUDA Graph、persistent kernel 都不改变 GEMM 的内循环，改的是 kernel 怎么被发射、怎么衔接。它们只有在“看得见整张图”的层面（CUDA graph 的录制者、编译器、推理框架）才能用好——这一页讲清楚为什么。</div></a></div>
+<h2 id="h-5">练习</h2><div class="progress"><div id="prog-bar"></div></div><div class="small muted" id="prog-text" data-fmt="{n} / {N} 题 · {m} / {M} 分钟"></div>
+<h3 id="h-5-1">Track A · 算力账与 Tensor Core 的数据布局</h3><p class="muted small">每一代要多大的 tile、warp 里谁拿哪个元素、SMEM 怎么摆才不冲突。所有代都用得上。</p>
+<div class="cards"><div class="card" data-id="A1" data-min="35"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">A1</span> <span class="cmeta">35 分钟 · 易</span></div><div class="ctitle"><a href="hints/a1_roofline_tiles.html">Roofline、tile 算术强度与寄存器 / SMEM 预算</a></div><div class="clinks"><a href="hints/a1_roofline_tiles.html">讲解与提示</a><a href="mine/a1_roofline_tiles.py">mine/</a><a href="tests/test_a1_roofline_tiles.py">tests/</a><a href="solutions/a1_roofline_tiles.py">solutions/</a></div></div><div class="card" data-id="A2" data-min="60"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">A2</span> <span class="cmeta">60 分钟 · 中</span></div><div class="ctitle"><a href="hints/a2_mma_fragments.html">mma.sync m16n8k16 的 fragment 布局与 ldmatrix</a></div><div class="clinks"><a href="hints/a2_mma_fragments.html">讲解与提示</a><a href="mine/a2_mma_fragments.py">mine/</a><a href="tests/test_a2_mma_fragments.py">tests/</a><a href="solutions/a2_mma_fragments.py">solutions/</a></div></div><div class="card" data-id="A3" data-min="45"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">A3</span> <span class="cmeta">45 分钟 · 中</span></div><div class="ctitle"><a href="hints/a3_bank_swizzle.html">SMEM bank conflict 与 CuTe Swizzle&lt;B,M,S&gt;</a></div><div class="clinks"><a href="hints/a3_bank_swizzle.html">讲解与提示</a><a href="mine/a3_bank_swizzle.py">mine/</a><a href="tests/test_a3_bank_swizzle.py">tests/</a><a href="solutions/a3_bank_swizzle.py">solutions/</a></div></div></div>
+<h3 id="h-5-2">Track B · Ampere → Hopper：异步搬运与同步</h3><p class="muted small">cp.async 多级流水、mbarrier 相位与字节记账、TMA box 与 multicast、warp specialization。</p>
+<div class="cards"><div class="card" data-id="B1" data-min="50"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">B1</span> <span class="cmeta">50 分钟 · 中</span></div><div class="ctitle"><a href="hints/b1_cp_async_pipeline.html">cp.async 多级流水：commit / wait_group 与 K 循环时间线</a></div><div class="clinks"><a href="hints/b1_cp_async_pipeline.html">讲解与提示</a><a href="mine/b1_cp_async_pipeline.py">mine/</a><a href="tests/test_b1_cp_async_pipeline.py">tests/</a><a href="solutions/b1_cp_async_pipeline.py">solutions/</a></div></div><div class="card" data-id="B2" data-min="60"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">B2</span> <span class="cmeta">60 分钟 · 难</span></div><div class="ctitle"><a href="hints/b2_mbarrier_pipeline.html">mbarrier：相位位、事务字节与 TMA 生产者/消费者环</a></div><div class="clinks"><a href="hints/b2_mbarrier_pipeline.html">讲解与提示</a><a href="mine/b2_mbarrier_pipeline.py">mine/</a><a href="tests/test_b2_mbarrier_pipeline.py">tests/</a><a href="solutions/b2_mbarrier_pipeline.py">solutions/</a></div></div><div class="card" data-id="B3" data-min="50"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">B3</span> <span class="cmeta">50 分钟 · 中</span></div><div class="ctitle"><a href="hints/b3_tma_box_copy.html">TMA box 拷贝：越界填零、128B swizzle、cluster multicast</a></div><div class="clinks"><a href="hints/b3_tma_box_copy.html">讲解与提示</a><a href="mine/b3_tma_box_copy.py">mine/</a><a href="tests/test_b3_tma_box_copy.py">tests/</a><a href="solutions/b3_tma_box_copy.py">solutions/</a></div></div><div class="card" data-id="B4" data-min="45"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">B4</span> <span class="cmeta">45 分钟 · 中</span></div><div class="ctitle"><a href="hints/b4_warp_specialization.html">Warp specialization：Pingpong vs Cooperative 与 setmaxnreg</a></div><div class="clinks"><a href="hints/b4_warp_specialization.html">讲解与提示</a><a href="mine/b4_warp_specialization.py">mine/</a><a href="tests/test_b4_warp_specialization.py">tests/</a><a href="solutions/b4_warp_specialization.py">solutions/</a></div></div></div>
+<h3 id="h-5-3">Track C · Blackwell 与 kernel 之间</h3><p class="muted small">TMEM 累加器、FP8/FP4 block scaling、tile 调度与 Stream-K、CUDA Graph 与 PDL。</p>
+<div class="cards"><div class="card" data-id="C1" data-min="45"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">C1</span> <span class="cmeta">45 分钟 · 中</span></div><div class="ctitle"><a href="hints/c1_tmem_accumulators.html">Blackwell TMEM：列分配、双缓冲累加器与 2-CTA MMA</a></div><div class="clinks"><a href="hints/c1_tmem_accumulators.html">讲解与提示</a><a href="mine/c1_tmem_accumulators.py">mine/</a><a href="tests/test_c1_tmem_accumulators.py">tests/</a><a href="solutions/c1_tmem_accumulators.py">solutions/</a></div></div><div class="card" data-id="C2" data-min="60"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">C2</span> <span class="cmeta">60 分钟 · 难</span></div><div class="ctitle"><a href="hints/c2_block_scaling.html">MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升</a></div><div class="clinks"><a href="hints/c2_block_scaling.html">讲解与提示</a><a href="mine/c2_block_scaling.py">mine/</a><a href="tests/test_c2_block_scaling.py">tests/</a><a href="solutions/c2_block_scaling.py">solutions/</a></div></div><div class="card" data-id="C3" data-min="55"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">C3</span> <span class="cmeta">55 分钟 · 中</span></div><div class="ctitle"><a href="hints/c3_tile_scheduler.html">Tile 调度：wave quantization、raster swizzle、persistent、Stream-K</a></div><div class="clinks"><a href="hints/c3_tile_scheduler.html">讲解与提示</a><a href="mine/c3_tile_scheduler.py">mine/</a><a href="tests/test_c3_tile_scheduler.py">tests/</a><a href="solutions/c3_tile_scheduler.py">solutions/</a></div></div><div class="card" data-id="C4" data-min="50"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">C4</span> <span class="cmeta">50 分钟 · 中</span></div><div class="ctitle"><a href="hints/c4_launch_timeline.html">Kernel 之间：stream vs CUDA Graph vs PDL 的时间线与依赖</a></div><div class="clinks"><a href="hints/c4_launch_timeline.html">讲解与提示</a><a href="mine/c4_launch_timeline.py">mine/</a><a href="tests/test_c4_launch_timeline.py">tests/</a><a href="solutions/c4_launch_timeline.py">solutions/</a></div></div></div>
+<h3 id="h-5-4">Track D · FlashAttention 1 → 4 的算法</h3><p class="muted small">online softmax 与 LSE 合并、FA2 的分块与 causal 跳块、FA4 的 exp2 多项式与条件 rescale。</p>
+<div class="cards"><div class="card" data-id="D1" data-min="45"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">D1</span> <span class="cmeta">45 分钟 · 中</span></div><div class="ctitle"><a href="hints/d1_online_softmax.html">Online softmax、(O, LSE) 状态与 split-KV 合并</a></div><div class="clinks"><a href="hints/d1_online_softmax.html">讲解与提示</a><a href="mine/d1_online_softmax.py">mine/</a><a href="tests/test_d1_online_softmax.py">tests/</a><a href="solutions/d1_online_softmax.py">solutions/</a></div></div><div class="card" data-id="D2" data-min="55"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">D2</span> <span class="cmeta">55 分钟 · 中</span></div><div class="ctitle"><a href="hints/d2_flash_forward.html">FlashAttention 前向分块：循环顺序、causal 跳块与 HBM 流量</a></div><div class="clinks"><a href="hints/d2_flash_forward.html">讲解与提示</a><a href="mine/d2_flash_forward.py">mine/</a><a href="tests/test_d2_flash_forward.py">tests/</a><a href="solutions/d2_flash_forward.py">solutions/</a></div></div><div class="card" data-id="D3" data-min="50"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">D3</span> <span class="cmeta">50 分钟 · 中</span></div><div class="ctitle"><a href="hints/d3_fa4_softmax_tricks.html">FA4 的 softmax：FMA 上的 exp2 多项式与条件 rescale</a></div><div class="clinks"><a href="hints/d3_fa4_softmax_tricks.html">讲解与提示</a><a href="mine/d3_fa4_softmax_tricks.py">mine/</a><a href="tests/test_d3_fa4_softmax_tricks.py">tests/</a><a href="solutions/d3_fa4_softmax_tricks.py">solutions/</a></div></div></div>
+<h3 id="h-5-5">Track G · RTX 5090 实战（真实 CUDA）</h3><p class="muted small">在 sm_120 上写 ldmatrix + mma.sync GEMM、cp.async 多级流水、FlashAttention-2 前向、PDL + CUDA Graph，并和 cuBLAS / SDPA 比速度。</p>
+<div class="cards"><div class="card" data-id="G1" data-min="75"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">G1</span> <span class="cmeta">75 分钟 · 难</span></div><div class="ctitle"><a href="hints/g1_mma_gemm.html">5090：ldmatrix + mma.sync 的 BF16 GEMM</a></div><div class="clinks"><a href="hints/g1_mma_gemm.html">讲解与提示</a><a href="mine/g1_mma_gemm.py">mine/</a><a href="tests/test_g1_mma_gemm.py">tests/</a><a href="solutions/g1_mma_gemm.py">solutions/</a></div></div><div class="card" data-id="G2" data-min="60"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">G2</span> <span class="cmeta">60 分钟 · 难</span></div><div class="ctitle"><a href="hints/g2_multistage_gemm.html">5090：cp.async 多级流水 GEMM（2 / 3 / 4 级）</a></div><div class="clinks"><a href="hints/g2_multistage_gemm.html">讲解与提示</a><a href="mine/g2_multistage_gemm.py">mine/</a><a href="tests/test_g2_multistage_gemm.py">tests/</a><a href="solutions/g2_multistage_gemm.py">solutions/</a></div></div><div class="card" data-id="G3" data-min="90"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">G3</span> <span class="cmeta">90 分钟 · 难</span></div><div class="ctitle"><a href="hints/g3_flash_attn.html">5090：FlashAttention-2 前向（mma.sync + online softmax）</a></div><div class="clinks"><a href="hints/g3_flash_attn.html">讲解与提示</a><a href="mine/g3_flash_attn.py">mine/</a><a href="tests/test_g3_flash_attn.py">tests/</a><a href="solutions/g3_flash_attn.py">solutions/</a></div></div><div class="card" data-id="G4" data-min="60"><div><input type="checkbox" class="chk" aria-label="done"> <span class="cid">G4</span> <span class="cmeta">60 分钟 · 中</span></div><div class="ctitle"><a href="hints/g4_pdl_graph.html">5090：PDL + CUDA Graph，测出 kernel 之间省下的时间</a></div><div class="clinks"><a href="hints/g4_pdl_graph.html">讲解与提示</a><a href="mine/g4_pdl_graph.py">mine/</a><a href="tests/test_g4_pdl_graph.py">tests/</a><a href="solutions/g4_pdl_graph.py">solutions/</a></div></div></div>
+<p><a href="cuda-kernels-dev-drills.pdf">📄 PDF 手册: cuda-kernels-dev-drills.pdf</a></p>
+
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#h-1">怎么用</a>
+<a class="o2" href="#h-2">环境</a>
+<a class="o2" href="#h-3">建议顺序</a>
+<a class="o2" href="#h-4">领域知识</a>
+<a class="o2" href="#h-5">练习</a>
+<a class="o3" href="#h-5-1">Track A · 算力账与 Tensor Core 的数据布局</a>
+<a class="o3" href="#h-5-2">Track B · Ampere → Hopper：异步搬运与同步</a>
+<a class="o3" href="#h-5-3">Track C · Blackwell 与 kernel 之间</a>
+<a class="o3" href="#h-5-4">Track D · FlashAttention 1 → 4 的算法</a>
+<a class="o3" href="#h-5-5">Track G · RTX 5090 实战（真实 CUDA）</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A2 · mma.sync m16n8k16 的 fragment 布局与 ldmatrix</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cuda-kernels-dev-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">CUDA Kernel 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一个问题，五个部件，四代答案</a>
+<a class="nav-l3" href="../knowledge/generations.html">每一代 GPU：加了什么、为什么、代码怎么变</a>
+<a class="nav-l3" href="../knowledge/flash_attention.html">FlashAttention 1 → 4：同一个算法，为硬件改写四次</a>
+<a class="nav-l3" href="../knowledge/between_kernels.html">Kernel 之间：CUDA Graph、PDL、persistent 与编译器</a>
+<div class="nav-group">Track A · 算力账与 Tensor Core 的数据布局</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_roofline_tiles.html"><span class="nid">A1</span>Roofline、tile 算术强度与寄存器 / SMEM 预算</a>
+<a class="nav-l3 cur" data-id="A2" href="../hints/a2_mma_fragments.html"><span class="nid">A2</span>mma.sync m16n8k16 的 fragment 布局与 ldmatrix</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_bank_swizzle.html"><span class="nid">A3</span>SMEM bank conflict 与 CuTe Swizzle&lt;B,M,S&gt;</a>
+<div class="nav-group">Track B · Ampere → Hopper：异步搬运与同步</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_cp_async_pipeline.html"><span class="nid">B1</span>cp.async 多级流水：commit / wait_group 与 K 循环时间线</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_mbarrier_pipeline.html"><span class="nid">B2</span>mbarrier：相位位、事务字节与 TMA 生产者/消费者环</a>
+<a class="nav-l3" data-id="B3" href="../hints/b3_tma_box_copy.html"><span class="nid">B3</span>TMA box 拷贝：越界填零、128B swizzle、cluster multicast</a>
+<a class="nav-l3" data-id="B4" href="../hints/b4_warp_specialization.html"><span class="nid">B4</span>Warp specialization：Pingpong vs Cooperative 与 setmaxnreg</a>
+<div class="nav-group">Track C · Blackwell 与 kernel 之间</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_tmem_accumulators.html"><span class="nid">C1</span>Blackwell TMEM：列分配、双缓冲累加器与 2-CTA MMA</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_block_scaling.html"><span class="nid">C2</span>MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升</a>
+<a class="nav-l3" data-id="C3" href="../hints/c3_tile_scheduler.html"><span class="nid">C3</span>Tile 调度：wave quantization、raster swizzle、persistent、Stream-K</a>
+<a class="nav-l3" data-id="C4" href="../hints/c4_launch_timeline.html"><span class="nid">C4</span>Kernel 之间：stream vs CUDA Graph vs PDL 的时间线与依赖</a>
+<div class="nav-group">Track D · FlashAttention 1 → 4 的算法</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_online_softmax.html"><span class="nid">D1</span>Online softmax、(O, LSE) 状态与 split-KV 合并</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_flash_forward.html"><span class="nid">D2</span>FlashAttention 前向分块：循环顺序、causal 跳块与 HBM 流量</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_fa4_softmax_tricks.html"><span class="nid">D3</span>FA4 的 softmax：FMA 上的 exp2 多项式与条件 rescale</a>
+<div class="nav-group">Track G · RTX 5090 实战（真实 CUDA）</div>
+<a class="nav-l3" data-id="G1" href="../hints/g1_mma_gemm.html"><span class="nid">G1</span>5090：ldmatrix + mma.sync 的 BF16 GEMM</a>
+<a class="nav-l3" data-id="G2" href="../hints/g2_multistage_gemm.html"><span class="nid">G2</span>5090：cp.async 多级流水 GEMM（2 / 3 / 4 级）</a>
+<a class="nav-l3" data-id="G3" href="../hints/g3_flash_attn.html"><span class="nid">G3</span>5090：FlashAttention-2 前向（mma.sync + online softmax）</a>
+<a class="nav-l3" data-id="G4" href="../hints/g4_pdl_graph.html"><span class="nid">G4</span>5090：PDL + CUDA Graph，测出 kernel 之间省下的时间</a></nav>
+<main>
+<header class="cover"><div class="kicker">A2 · Track A · 算力账与 Tensor Core 的数据布局 · 60 分钟 · 中</div><h1>A2 · mma.sync m16n8k16 的 fragment 布局与 ldmatrix</h1><p class="lede">从 Volta 起矩阵乘是一条 warp 指令，但 32 个线程各自只拿着矩阵的几个元素。写 Ampere 风格 kernel 的核心，就是让每个线程寄存器里放的恰好是 mma 要的那几个——ldmatrix 让这件事只要一条指令。</p><p class="small">文件: <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/mine/a2_mma_fragments.py"><code>mine/a2_mma_fragments.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/tests/test_a2_mma_fragments.py"><code>tests/test_a2_mma_fragments.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/solutions/a2_mma_fragments.py"><code>solutions/a2_mma_fragments.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="A2"> 我已完成这道题</label></header>
+<h2 id="a2-1">题面速览</h2>
+<ul>
+<li><strong>在系统中的位置</strong>：CuTe 把一条 PTX <code>mma</code> 包成一个 “MMA atom”，例如 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/mma_sm80.hpp#L224">SM80_16x8x16_F32BF16BF16F32_TN</a>（A 4 个寄存器、B 2 个、C 4 个），线程到元素的映射写在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/mma_traits_sm80.hpp">mma_traits_sm80.hpp</a> 的 <code>ALayout / BLayout / CLayout</code> 里。<code>ldmatrix</code> 是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/copy_sm75.hpp#L121">SM75_U32x4_LDSM_N</a>（Turing 引入）。RTX 5090 上 G1、G3 用的就是这两条指令。</li>
+<li><strong>你要实现</strong>：<code>a_coords / b_coords / c_coords</code>（每个 lane 持有哪些元素）、<code>mma_m16n8k16</code>（warp 级 MMA 的语义）、<code>ldmatrix</code>（谁给地址、谁拿数据）、<code>a_tile_row_addrs / b_tile_row_addrs</code>（让 ldmatrix 直接读出 fragment 布局的地址）。</li>
+<li><strong>难点在这几条规则</strong>：
+<ol>
+<li><code>g = lane / 4</code>（行组）、<code>t = lane % 4</code>（组内序号）；<strong>一个 quad（4 个相邻 lane）共同拥有两整行</strong>（g 和 g+8）。</li>
+<li>每个 32-bit 寄存器装<strong>两个相邻</strong>元素：A、C 是同一行相邻两列；B 是同一列相邻两个 k。</li>
+<li>A 的寄存器顺序是 <strong>左上、左下、右上、右下</strong> 四个 8×8 子块。</li>
+<li>ldmatrix：lane <code>8j..8j+7</code> 给出第 j 个 8×8 矩阵的 8 行地址；lane l 拿到每个矩阵第 <code>l/4</code> 行的第 <code>2(l%4)</code>、<code>+1</code> 列。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：lane 0 / 5 的坐标 · 每个元素恰好属于一个 lane · warp MMA = numpy 矩阵乘 · C 布局和 A 布局按行对齐 · ldmatrix.x1 的分发 · num 非法 · x4 + A 地址 = A fragment（多种 ld）· x2 + B 地址 = B fragment · 从“SMEM”到 MMA 的完整链路。</p>
+<h2 id="a2-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 32 个人一起拼一幅 16×16 的拼图</div><p>一个 warp 是 32 个人围着桌子拼图。规则是：每 4 个人一组（quad），第 g 组负责第 g 行和第 g+8 行；组里第 t 个人负责这两行的第 2t、2t+1 列和第 2t+8、2t+9 列——每次两块相邻的拼一起放进一个口袋（寄存器）。<code>ldmatrix</code> 像是一个分拣员：32 个人各报一个“这一行在哪个抽屉里”的地址（8 个人报一个 8×8 小块的 8 行），分拣员把整块搬出来，再按“每 4 人一行、每人两块”的规则塞进各自口袋。报地址的人和拿到拼图的人，<strong>不是同一套对应关系</strong>——这是最容易绕晕的地方。</p>
+</div>
+<h2 id="a2-3">图解：A 的 4 个寄存器 = 4 个 8×8 子块</h2>
+
+<figure class="flow"><div class="flow-head">16×16 的 A tile 在 lane l 手里的样子<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;16×16 的 A tile 在 lane l 手里的样子&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;a0&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;a0：左上&quot;, &quot;s&quot;: &quot;行 g，列 2t,2t+1&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a2&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;a2：右上&quot;, &quot;s&quot;: &quot;行 g，列 2t+8,+9&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a1&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;a1：左下&quot;, &quot;s&quot;: &quot;行 g+8，列 2t,2t+1&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a3&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;a3：右下&quot;, &quot;s&quot;: &quot;行 g+8，列 2t+8,+9&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ld&quot;, &quot;c&quot;: 2.3, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;ldmatrix.x4&quot;, &quot;s&quot;: &quot;矩阵 j ← lane 8j..8j+7&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;mma&quot;, &quot;c&quot;: 2.3, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;mma.sync m16n8k16&quot;, &quot;s&quot;: &quot;D = A·B + C&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;ld&quot;, &quot;b&quot;: &quot;a2&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ld:b&quot;, &quot;b&quot;: &quot;mma:t&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;a3&quot;, &quot;b&quot;: &quot;mma&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 172.0}}"></div><figcaption>x4 的四个矩阵依次是左上、左下、右上、右下，正好对应 a0..a3：<code>a_tile_row_addrs</code> 里矩阵 j 的行 = <code>r + 8·(j % 2)</code>，列 = <code>8·(j / 2)</code>。C 的 c0..c3 和 a0、a1 用同一套“行 g / 行 g+8、列 2t”规律，所以 S = QKᵀ 的结果可以不经 shuffle 直接当下一次 P·V 的 A 操作数（G3 的关键技巧）。</figcaption></figure>
+<h2 id="a2-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ lane 5 的一生：从 SMEM 到累加器</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;smem&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;SMEM 16×16&quot;, &quot;s&quot;: &quot;行跨度 16&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;addr&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;lane 5 报地址&quot;, &quot;s&quot;: &quot;矩阵 0 第 5 行 = 80&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;regs&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;lane 5 的寄存器&quot;, &quot;s&quot;: &quot;8 个 bf16&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;mma&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;mma.sync&quot;, &quot;s&quot;: &quot;和 B、C 一起&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;lane 5 的 C&quot;, &quot;s&quot;: &quot;(1,2)(1,3)(9,2)(9,3)&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;smem&quot;, &quot;b&quot;: &quot;addr&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;addr&quot;, &quot;b&quot;: &quot;regs&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;regs&quot;, &quot;b&quot;: &quot;mma&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;mma&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 96.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="regs"><div class="step-title">1. 坐标</div><p>lane 5：g = 1，t = 1。<code>a_coords(5)</code> = (1,2) (1,3) (9,2) (9,3) (1,10) (1,11) (9,10) (9,11)：行 1 和行 9，列 2–3 和 10–11。</p>
+</div><div class="step" data-hl="smem,addr"><div class="step-title">2. 报地址</div><p><code>a_tile_row_addrs(0, 16)</code>：lane 0..7 报矩阵 0（左上）的第 0..7 行 = 0, 16, …, 112；lane 8 报矩阵 1（左下）第 0 行 = 128；lane 16 报矩阵 2（右上）第 0 行 = 8；lane 24 报矩阵 3 第 0 行 = 136。lane 5 报的是 80（矩阵 0 第 5 行），<strong>但它拿到的不是第 5 行</strong>。</p>
+</div><div class="step" data-hl="addr,regs"><div class="step-title">3. 拿数据</div><p>以 smem[i] = i 为例，ldmatrix.x4 后 lane 5 拿到 <code>[18 19 146 147 26 27 154 155]</code>：18 = 第 1 行第 2 列，146 = 第 9 行第 2 列，26 = 第 1 行第 10 列……正好是它的 <code>a_coords</code>。lane 0 拿到 <code>[0 1 128 129 8 9 136 137]</code>。</p>
+</div><div class="step" data-hl="regs,mma,c"><div class="step-title">4. MMA</div><p>32 个 lane 的 a、b、c 拼成 16×16、16×8、16×8 三个矩阵，算 D = A·B + C，再按 <code>c_coords</code> 分回：lane 5 得到 D 的 (1,2) (1,3) (9,2) (9,3)。</p>
+</div></div></div>
+<h2 id="a2-5">易错点</h2>
+<ul>
+<li><strong>把 a1 和 a2 搞反。</strong> PTX 规定 a1 是“下半”（行 g+8）而 a2 是“右半”（列 +8）。顺序错了 <code>test_lane_zero_and_lane_five_coordinates</code> 直接失败。</li>
+<li><strong>以为 lane l 拿到的就是自己报地址的那一行。</strong> 分发规则是 <code>l/4</code> 行，和报地址的 <code>l%8</code> 无关；<code>test_ldmatrix_x1_distributes_rows_to_quads</code> 抓这个。</li>
+<li><strong>B 用了 A 的规律。</strong> B 寄存器里的两个元素是同一列 n 的相邻两个 k（“col” 布局），所以 B 要按 N×K（B 的转置、k 连续）存放才能用非转置 ldmatrix；否则要 <code>ldmatrix.trans</code>（G3 读 V 时就是这样）。</li>
+<li><strong>x2 时用了 lane 16..31 的地址。</strong> x2 只看 lane 0..15，其余地址被忽略（但必须是合法地址）。</li>
+<li><strong>在 mma 里按 lane 顺序直接 reshape。</strong> fragment 不是按 lane 连续排列的，必须按坐标拼。</li>
+</ul>
+<h2 id="a2-6">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 示例与关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">a_coords(0)   # [(0,0),(0,1),(8,0),(8,1),(0,8),(0,9),(8,8),(8,9)]
+a_coords(31)  # [(7,6),(7,7),(15,6),(15,7),(7,14),(7,15),(15,14),(15,15)]
+b_coords(31)  # [(6,7),(7,7),(14,7),(15,7)]
+c_coords(31)  # [(7,6),(7,7),(15,6),(15,7)]
+a_tile_row_addrs(0, 16)[:9]   # [0,16,32,48,64,80,96,112,128]
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>每个 lane 拿 A 的 8 个元素、B 的 4 个、C 的 4 个。总数对得上吗（16·16、16·8、16·8）？</li>
+<li>一行 A（16 个元素）分布在哪几个 lane 上？</li>
+<li>为什么 C 布局和 A 布局“按行对齐”很重要？</li>
+<li>B 如果是 K×N、n 连续地存在 SMEM 里，该用哪种 ldmatrix？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li>坐标函数：先算 <code>g, t</code>，A 按 <code>(0,0),(8,0),(0,8),(8,8)</code> 四个偏移各放两个相邻列。</li>
+<li><code>mma_m16n8k16</code>：建三个零矩阵，按坐标把 32 行数据散进去，<code>D = A @ B + C</code>，再按 <code>c_coords</code> 收回来。</li>
+<li><code>ldmatrix</code>：外层循环矩阵 j，取 8 行 <code>smem[addr : addr+8]</code>；内层循环 lane：<code>r = l // 4</code>，<code>c = 2*(l % 4)</code>。</li>
+<li>地址函数：A 的矩阵 j：行偏移 <code>8*(j%2)</code>，列偏移 <code>8*(j//2)</code>；B 的矩阵 j：列偏移 <code>8*j</code>（只有 2 个矩阵）。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>详解：答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>关键问题答案</summary><div class="body"><ol>
+<li>32 × 8 = 256 = 16×16；32 × 4 = 128 = 16×8，两者都对得上，没有重复也没有遗漏（<code>test_each_element_owned_by_exactly_one_lane</code>）。</li>
+<li>第 g 行在 lane 4g..4g+3 上，每个 lane 4 个元素（列 2t、2t+1、2t+8、2t+9）。所以 FA 里“求一行的最大值”只要在 quad 内做两次 <code>__shfl_xor_sync</code>（1 和 2）。</li>
+<li>S = QKᵀ 的输出在 C 布局，P = exp(S − m) 要作为下一次 P·V 的 A 操作数。两者行对齐，只需把 c0..c3 两两打包成 bf16（<code>pack_bf16</code>），零 shuffle。FA2 源码里的 <a class="src" href="https://github.com/Dao-AILab/flash-attention/blob/dbabcc788590e793eee11566d7253906187e612e/csrc/flash_attn/src/utils.h#L200">convert_layout_acc_Aregs</a> 做的就是这件事。</li>
+<li><code>ldmatrix.trans</code>：它把 8×8 子块转置后再分发，lane 拿到的是同一列相邻两行，也就是 B 布局。G3 读 V（<code>[key][d]</code>）时用的就是 <code>ldmatrix_x4_trans</code>，对应 CuTe 的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/copy_sm75.hpp#L181">SM75_U16x8_LDSM_T</a>。</li>
+</ol>
+</div></details></div></details>
+<h2 id="a2-7">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/a2_mma_fragments.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/a2_mma_fragments.py</span><span class="muted small">131 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;A2 · mma.sync m16n8k16 fragment layout and ldmatrix — reference solution.
+
+从 Volta 开始，矩阵乘是“一个 warp 一条指令”：32 个线程各自拿着矩阵的几个元素（fragment），
+一起执行 `mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32`。写 Ampere 风格 kernel 的核心难点，
+就是让每个线程寄存器里放的恰好是指令要的那几个元素。这道题用 numpy 把 PTX 文档里的布局写出来，
+并模拟 `ldmatrix` 怎么一条指令把 SMEM 里的 tile 直接读成这个布局。
+
+记号：lane ∈ [0, 32)，g = lane // 4（groupID），t = lane % 4（threadID_in_group）。
+
+- a_coords(lane): A（16×16，row-major 语义）的 8 个元素，按寄存器顺序 a0..a3、每个寄存器低半在前：
+    a0 = (g, 2t), (g, 2t+1)      a1 = (g+8, 2t), (g+8, 2t+1)
+    a2 = (g, 2t+8), (g, 2t+9)    a3 = (g+8, 2t+8), (g+8, 2t+9)
+  返回 8 个 (row, col)。
+- b_coords(lane): B（16×8，K×N）的 4 个元素：b0 = (2t, g), (2t+1, g)；b1 = (2t+8, g), (2t+9, g)。返回 (k, n)。
+- c_coords(lane): C/D（16×8 FP32）的 4 个元素：(g, 2t), (g, 2t+1), (g+8, 2t), (g+8, 2t+1)。返回 (m, n)。
+- mma_m16n8k16(a, b, c): a 形状 (32, 8)、b (32, 4)、c (32, 4)，第 i 行是 lane i 按上面顺序持有的元素。
+  返回 d (32, 4)：D = A @ B + C，按 c_coords 分回各 lane。用 float64 计算即可。
+- ldmatrix(smem, row_addrs, num): 模拟 `ldmatrix.sync.aligned.m8n8.x{num}.shared.b16`（num ∈ {1,2,4}）。
+  smem 是 1D 数组（元素 = b16），row_addrs 是 32 个元素偏移：第 j 个 8×8 矩阵的 8 行地址由
+  lane 8j..8j+7 提供（num 之外的 lane 地址被忽略）。每行 8 个连续元素。
+  结果 (32, 2·num)：lane l 的第 j 个寄存器（列 2j、2j+1）= 矩阵 j 的第 l//4 行、第 2·(l%4) 和 +1 列。
+  num 不是 1/2/4 时抛 ValueError。
+- a_tile_row_addrs(base, ld): 用 ldmatrix.x4 读一个从 base 开始、行跨度 ld 的 16×16 A tile 时，
+  32 个 lane 各自该提供的行地址，使得结果恰好等于 a_coords 的布局。
+- b_tile_row_addrs(base, ld): B 以 N×K（每行一个 n、k 连续，即 “TN” 里的 B^T）存放、从 base 开始、
+  行跨度 ld 时，ldmatrix.x2 读一个 16(K)×8(N) 的 B tile 所需的地址（lane 0..15 有效，其余填 base 即可），
+  使结果等于 b_coords 的布局。
+
+API
+    a_coords(lane) -&gt; list[tuple[int, int]]
+    b_coords(lane) -&gt; list[tuple[int, int]]
+    c_coords(lane) -&gt; list[tuple[int, int]]
+    mma_m16n8k16(a, b, c) -&gt; np.ndarray
+    ldmatrix(smem, row_addrs, num) -&gt; np.ndarray
+    a_tile_row_addrs(base, ld) -&gt; list[int]
+    b_tile_row_addrs(base, ld) -&gt; list[int]
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import numpy as np
+
+
+def a_coords(lane: int) -&gt; list[tuple[int, int]]:
+    &quot;&quot;&quot;lane 持有的 8 个 A 元素坐标（寄存器 a0..a3，每个两个元素）。&quot;&quot;&quot;
+    # 规律：行 = g 或 g+8（上下两半），列 = 2t 或 2t+8（左右两半），每个寄存器装两个相邻列。
+    # 所以一个 quad（4 个相邻 lane，同一个 g）合起来正好覆盖第 g 行和第 g+8 行的全部 16 列。
+    g, t = lane // 4, lane % 4
+    out = []
+    for r_off, c_off in ((0, 0), (8, 0), (0, 8), (8, 8)):     # a0, a1, a2, a3
+        out += [(g + r_off, 2 * t + c_off), (g + r_off, 2 * t + c_off + 1)]
+    return out
+
+
+def b_coords(lane: int) -&gt; list[tuple[int, int]]:
+    &quot;&quot;&quot;lane 持有的 4 个 B 元素坐标 (k, n)。&quot;&quot;&quot;
+    # B 是“col”布局：一个寄存器里的两个元素是同一列 n、相邻两个 k。
+    # 这正是 B^T（N×K、k 连续）按行存放时 ldmatrix 非转置读出来的样子。
+    g, t = lane // 4, lane % 4
+    return [(2 * t, g), (2 * t + 1, g), (2 * t + 8, g), (2 * t + 9, g)]
+
+
+def c_coords(lane: int) -&gt; list[tuple[int, int]]:
+    &quot;&quot;&quot;lane 持有的 4 个 C/D 元素坐标 (m, n)。&quot;&quot;&quot;
+    # 和 A 的 a0/a1 同一套行规律：这就是 FlashAttention 能把 S = QK^T 的结果（C 布局）
+    # 直接当成下一次 P·V 的 A 操作数（A 布局）的原因——行完全对得上，只差 dtype 转换。
+    g, t = lane // 4, lane % 4
+    return [(g, 2 * t), (g, 2 * t + 1), (g + 8, 2 * t), (g + 8, 2 * t + 1)]
+
+
+def mma_m16n8k16(a: np.ndarray, b: np.ndarray, c: np.ndarray) -&gt; np.ndarray:
+    &quot;&quot;&quot;warp 级 MMA：按布局拼出 A、B、C，算 D = A@B + C，再按 C 布局分回各 lane。&quot;&quot;&quot;
+    A = np.zeros((16, 16))
+    B = np.zeros((16, 8))
+    C = np.zeros((16, 8))
+    for lane in range(32):
+        for v, (r, k) in zip(a[lane], a_coords(lane)):
+            A[r, k] = v
+        for v, (k, n) in zip(b[lane], b_coords(lane)):
+            B[k, n] = v
+        for v, (r, n) in zip(c[lane], c_coords(lane)):
+            C[r, n] = v
+    D = A @ B + C
+    d = np.zeros((32, 4))
+    for lane in range(32):
+        d[lane] = [D[r, n] for r, n in c_coords(lane)]
+    return d
+
+
+def ldmatrix(smem: np.ndarray, row_addrs, num: int) -&gt; np.ndarray:
+    &quot;&quot;&quot;模拟 ldmatrix.x{num}：lane 8j..8j+7 给出矩阵 j 的 8 行地址；结果 (32, 2·num)。&quot;&quot;&quot;
+    if num not in (1, 2, 4):
+        raise ValueError(&quot;ldmatrix num must be 1, 2 or 4&quot;)
+    # 关键点：“谁提供地址”和“谁拿到数据”是两回事。地址按 lane 8j+r 给出矩阵 j 的第 r 行，
+    # 数据则按 mma 的 fragment 规律分发：lane l 拿到每个矩阵第 l//4 行的第 2(l%4)、2(l%4)+1 列。
+    # 硬件在 warp 内部做这次“转置式”重分发，所以一条指令代替了 8 次 32-bit 的 ld.shared + shuffle。
+    out = np.zeros((32, 2 * num), dtype=smem.dtype)
+    for j in range(num):
+        rows = [smem[row_addrs[8 * j + r]: row_addrs[8 * j + r] + 8] for r in range(8)]
+        for lane in range(32):
+            r, c = lane // 4, 2 * (lane % 4)
+            out[lane, 2 * j] = rows[r][c]
+            out[lane, 2 * j + 1] = rows[r][c + 1]
+    return out
+
+
+def a_tile_row_addrs(base: int, ld: int) -&gt; list[int]:
+    &quot;&quot;&quot;ldmatrix.x4 读 16×16 A tile 时每个 lane 提供的行地址。&quot;&quot;&quot;
+    # 寄存器 a0..a3 依次是：左上、左下、右上、右下 四个 8×8 子矩阵。
+    # 矩阵 j = lane // 8：j 的低位选上下（+8 行），高位选左右（+8 列）。
+    addrs = []
+    for lane in range(32):
+        j, r = lane // 8, lane % 8
+        row = r + 8 * (j % 2)
+        col = 8 * (j // 2)
+        addrs.append(base + row * ld + col)
+    return addrs
+
+
+def b_tile_row_addrs(base: int, ld: int) -&gt; list[int]:
+    &quot;&quot;&quot;ldmatrix.x2 读 16(K)×8(N) 的 B tile（B^T 按 N×K 存）时每个 lane 提供的行地址。&quot;&quot;&quot;
+    # 每一行是一个 n、8 个连续 k。矩阵 0 = k 0..7，矩阵 1 = k 8..15。
+    # 若 B 是 K×N 存放（n 连续），就得用 ldmatrix.trans，或者改用 TN 布局——
+    # 这就是 CUTLASS 里 “TN GEMM” 最常见、最快的原因。
+    addrs = []
+    for lane in range(32):
+        if lane &lt; 16:
+            j, r = lane // 8, lane % 8
+            addrs.append(base + r * ld + 8 * j)
+        else:
+            addrs.append(base)
+    return addrs</code></pre></div></div></details>
+<h2 id="a2-8">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li><strong>“Hopper 的 wgmma 还需要 ldmatrix 吗？”</strong> 不需要：A、B 用 64-bit SMEM 描述符直接从 SMEM 读（<code>desc_a / desc_b</code>），只有累加器在寄存器里。描述符里要写 swizzle 模式，所以 A3 / B3 的 swizzle 必须和 TMA 写入一致。</li>
+<li><strong>“Blackwell 呢？”</strong> <code>tcgen05.mma</code> 由一个线程发起，A/B 在 SMEM（A 也可以在 TMEM），D 在 TMEM：fragment 布局这件事从寄存器搬到了 TMEM 的 lane/列上（C1）。</li>
+<li><strong>“m16n8k16 的 FP8 版本？”</strong> sm89 / sm120 有 <code>mma.sync … .e4m3</code>，k = 32：同样的 16×8 输出，每个寄存器装 4 个 FP8。sm120 的 block-scaled 版本见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/mma_sm120.hpp#L45">SM120_16x8x32_TN</a>。</li>
+<li><strong>“为什么叫 TN？”</strong> BLAS 的列主序视角下 A 转置（T）、B 不转置（N）；换成行主序就是 “A 是 M×K 行主序、B 是 N×K 行主序”，两边都是 K 连续——ldmatrix 非转置就能直接读，所以 TN 是最快的布局。</li>
+</ul>
+
+<nav class="pager"><a href="a1_roofline_tiles.html">← 上一题 A1</a><a href="a3_bank_swizzle.html">A3 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#a2-1">题面速览</a>
+<a class="o2" href="#a2-2">直觉与类比</a>
+<a class="o2" href="#a2-3">图解：A 的 4 个寄存器 = 4 个 8×8 子块</a>
+<a class="o2" href="#a2-4">逐步演示</a>
+<a class="o2" href="#a2-5">易错点</a>
+<a class="o2" href="#a2-6">三级提示</a>
+<a class="o2" href="#a2-7">参考解</a>
+<a class="o2" href="#a2-8">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

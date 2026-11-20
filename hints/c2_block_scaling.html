@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C2 · MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cuda-kernels-dev-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">CUDA Kernel 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一个问题，五个部件，四代答案</a>
+<a class="nav-l3" href="../knowledge/generations.html">每一代 GPU：加了什么、为什么、代码怎么变</a>
+<a class="nav-l3" href="../knowledge/flash_attention.html">FlashAttention 1 → 4：同一个算法，为硬件改写四次</a>
+<a class="nav-l3" href="../knowledge/between_kernels.html">Kernel 之间：CUDA Graph、PDL、persistent 与编译器</a>
+<div class="nav-group">Track A · 算力账与 Tensor Core 的数据布局</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_roofline_tiles.html"><span class="nid">A1</span>Roofline、tile 算术强度与寄存器 / SMEM 预算</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_mma_fragments.html"><span class="nid">A2</span>mma.sync m16n8k16 的 fragment 布局与 ldmatrix</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_bank_swizzle.html"><span class="nid">A3</span>SMEM bank conflict 与 CuTe Swizzle&lt;B,M,S&gt;</a>
+<div class="nav-group">Track B · Ampere → Hopper：异步搬运与同步</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_cp_async_pipeline.html"><span class="nid">B1</span>cp.async 多级流水：commit / wait_group 与 K 循环时间线</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_mbarrier_pipeline.html"><span class="nid">B2</span>mbarrier：相位位、事务字节与 TMA 生产者/消费者环</a>
+<a class="nav-l3" data-id="B3" href="../hints/b3_tma_box_copy.html"><span class="nid">B3</span>TMA box 拷贝：越界填零、128B swizzle、cluster multicast</a>
+<a class="nav-l3" data-id="B4" href="../hints/b4_warp_specialization.html"><span class="nid">B4</span>Warp specialization：Pingpong vs Cooperative 与 setmaxnreg</a>
+<div class="nav-group">Track C · Blackwell 与 kernel 之间</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_tmem_accumulators.html"><span class="nid">C1</span>Blackwell TMEM：列分配、双缓冲累加器与 2-CTA MMA</a>
+<a class="nav-l3 cur" data-id="C2" href="../hints/c2_block_scaling.html"><span class="nid">C2</span>MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升</a>
+<a class="nav-l3" data-id="C3" href="../hints/c3_tile_scheduler.html"><span class="nid">C3</span>Tile 调度：wave quantization、raster swizzle、persistent、Stream-K</a>
+<a class="nav-l3" data-id="C4" href="../hints/c4_launch_timeline.html"><span class="nid">C4</span>Kernel 之间：stream vs CUDA Graph vs PDL 的时间线与依赖</a>
+<div class="nav-group">Track D · FlashAttention 1 → 4 的算法</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_online_softmax.html"><span class="nid">D1</span>Online softmax、(O, LSE) 状态与 split-KV 合并</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_flash_forward.html"><span class="nid">D2</span>FlashAttention 前向分块：循环顺序、causal 跳块与 HBM 流量</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_fa4_softmax_tricks.html"><span class="nid">D3</span>FA4 的 softmax：FMA 上的 exp2 多项式与条件 rescale</a>
+<div class="nav-group">Track G · RTX 5090 实战（真实 CUDA）</div>
+<a class="nav-l3" data-id="G1" href="../hints/g1_mma_gemm.html"><span class="nid">G1</span>5090：ldmatrix + mma.sync 的 BF16 GEMM</a>
+<a class="nav-l3" data-id="G2" href="../hints/g2_multistage_gemm.html"><span class="nid">G2</span>5090：cp.async 多级流水 GEMM（2 / 3 / 4 级）</a>
+<a class="nav-l3" data-id="G3" href="../hints/g3_flash_attn.html"><span class="nid">G3</span>5090：FlashAttention-2 前向（mma.sync + online softmax）</a>
+<a class="nav-l3" data-id="G4" href="../hints/g4_pdl_graph.html"><span class="nid">G4</span>5090：PDL + CUDA Graph，测出 kernel 之间省下的时间</a></nav>
+<main>
+<header class="cover"><div class="kicker">C2 · Track C · Blackwell 与 kernel 之间 · 60 分钟 · 难</div><h1>C2 · MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升</h1><p class="lede">FP8 / FP4 让 Tensor Core 吞吐翻倍再翻倍，代价是 4 bit 只能表示 ±{0, 0.5, 1, 1.5, 2, 3, 4, 6}。能用的前提是“每一小块共享一个 scale”。Blackwell 在 Tensor Core 里直接乘 scale；Hopper 上 DeepGEMM 每 128 个 K 在 CUDA core 上乘，同时绕开了 FP8 累加器精度不够的问题。</p><p class="small">文件: <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/mine/c2_block_scaling.py"><code>mine/c2_block_scaling.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/tests/test_c2_block_scaling.py"><code>tests/test_c2_block_scaling.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/solutions/c2_block_scaling.py"><code>solutions/c2_block_scaling.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="C2"> 我已完成这道题</label></header>
+<h2 id="c2-1">题面速览</h2>
+<ul>
+<li><strong>在系统中的位置</strong>：Blackwell 的 <code>tcgen05.mma.kind::mxf8f6f4 / mxf4nvf4 .block_scale</code>（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/mma_sm100_umma.hpp#L1622">SM100_MMA_MXF4_SS</a>，scale 在 TMEM 里）；RTX 5090 的 warp 级版本 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/mma_sm120.hpp#L45">SM120_16x8x32_TN</a>（<code>mma.sync … block_scale</code>，sm120 上能真跑）；格式类型 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/float_subbyte.h#L73">float_e2m1_t</a>、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/float8.h#L1228">float_ue8m0_t</a>。Hopper 上的软件做法：<a class="src" href="https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm90_fp8_gemm_1d2d.cuh">DeepGEMM sm90_fp8_gemm_1d2d.cuh</a>。</li>
+<li><strong>你要实现</strong>：<code>quantize_e2m1</code>、<code>mx_quantize</code>（MXFP8 / MXFP4）、<code>nvfp4_quantize</code>、<code>dequantize</code>、<code>block_scaled_dot</code>、<code>promoted_dot</code>。<code>round_e4m3</code>、<code>round_mantissa</code> 已给出。</li>
+<li><strong>难点在这几条规则</strong>：
+<ol>
+<li>E2M1 的格点<strong>不均匀</strong>（间隔 0.5 / 0.5 / 1 / 2），不能用“除以步长再 round”；平局取尾数位为 0 的那个。</li>
+<li>MX：每 32 个元素一个 2 的幂 scale = <code>2^(floor(log2 amax) − emax)</code>，emax 是元素格式的最大指数（E4M3 是 8，E2M1 是 2）。</li>
+<li>NVFP4：每 16 个元素一个 <strong>E4M3</strong> scale（有尾数）+ 一个全张量 FP32 scale，两级。</li>
+<li>低精度累加器加久了会“吞掉”小的加数；每隔 128 个 K 把部分和提升到高精度，误差降几个数量级。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：E2M1 格点与符号 · 平局取偶 · 就近与饱和 · MX E4M3 的 scale 是 2 的幂且等于公式 · 一个已知 E2M1 块（7 饱和成 6）· 零块与报错 · NVFP4 误差小于 MXFP4 · NVFP4 的全局 scale 与零块 · block-scaled 点积 = 反量化后的点积 · 提升修复 swamping · 提升边界。</p>
+<h2 id="c2-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 每一页一个比例尺的地图册</div><p>FP4 像一张只有 8 个刻度的尺子（0、0.5、1、1.5、2、3、4、6）。想用它量一整个国家，只能每一页地图配一个比例尺：这一页是城市（scale 小），那一页是沙漠（scale 大），尺子还是那把尺子。MX 格式的比例尺只能是 2 的幂（1:1、1:2、1:4……），所以经常“刚好差一点”，最大的那个值被截掉；NVFP4 的比例尺本身就是一个 FP8 数（可以是 1:1.17），而且每 16 个元素就换一页，量得更准。DeepGEMM 的“提升”则像记账：在小本子上（Tensor Core 里精度有限的累加器）记 128 笔就誊到总账（FP32）上，小本子永远不会记到“大数吃掉小数”的地步。</p>
+</div>
+<h2 id="c2-3">图解：一次 block-scaled 点积</h2>
+
+<figure class="flow"><div class="flow-head">量化 → Tensor Core → 乘 scale → FP32<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;量化 → Tensor Core → 乘 scale → FP32&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;x&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;BF16 激活 / 权重&quot;, &quot;s&quot;: &quot;按 16 或 32 分块&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;每块一个 scale&quot;, &quot;s&quot;: &quot;UE8M0 或 E4M3&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;q&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;FP4 / FP8 元素&quot;, &quot;s&quot;: &quot;E2M1 / E4M3&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;mma&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;块内乘加&quot;, &quot;s&quot;: &quot;Tensor Core&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;acc&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;× sa·sb → FP32&quot;, &quot;s&quot;: &quot;Blackwell：在 TC 里&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;dg&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;Hopper：wgmma&quot;, &quot;s&quot;: &quot;每 128 K 在 CUDA core 乘&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;x&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;s&quot;, &quot;b&quot;: &quot;q&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;q&quot;, &quot;b&quot;: &quot;mma&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;mma&quot;, &quot;b&quot;: &quot;acc&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;q:b&quot;, &quot;b&quot;: &quot;dg:t&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;dg&quot;, &quot;b&quot;: &quot;acc&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 210.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 172.0}}"></div><figcaption>Blackwell 的 block-scaled MMA 在 Tensor Core 里做“块内乘加 × 两边的 scale”；Hopper 的 wgmma 不认识 scale，DeepGEMM 让 wgmma 累加一个 128-K 的块，再在 CUDA core 上 <code>final += sa·sb·partial</code>（<a class="src" href="https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm90_fp8_gemm_1d2d.cuh#L308-L344">L308–344</a>）。</figcaption></figure>
+<h2 id="c2-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 一块数据 [0.12, −0.5, 3.1, 7.0, 0.9, −2.2, 0, 1.6, …]</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;amax&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;amax = 7&quot;, &quot;s&quot;: &quot;块内最大绝对值&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;mx&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;MXFP4&quot;, &quot;s&quot;: &quot;scale 2^0 = 1&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;nv&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;NVFP4&quot;, &quot;s&quot;: &quot;scale = 7/6&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;acc&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;累加&quot;, &quot;s&quot;: &quot;提升 vs 不提升&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;amax&quot;, &quot;b&quot;: &quot;mx&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;mx&quot;, &quot;b&quot;: &quot;nv&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;nv&quot;, &quot;b&quot;: &quot;acc&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 90.0, &quot;nw&quot;: 166.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="amax"><div class="step-title">1. E2M1 的取整</div><p><code>quantize_e2m1([0.25, 0.75, 1.25, 2.5, 5.0, 7.0, −0.3])</code> = <code>[0, 1, 1, 2, 4, 6, −0.5]</code>：0.25 在 0 和 0.5 中间，取 0（尾数位 0）；2.5 取 2；5.0 取 4；7 饱和成 6。</p>
+</div><div class="step" data-hl="mx"><div class="step-title">2. MXFP4</div><p><code>floor(log2 7) − 2 = 0</code> → scale 1。元素 <code>[0, −0.5, 3, 6, 1, −2, 0, 1.5]</code>。7.0 变成 6（误差 1），3.1 变成 3。</p>
+</div><div class="step" data-hl="nv"><div class="step-title">3. NVFP4</div><p>这一块（16 个元素）的 E4M3 scale × 全局 scale = 7/6：元素同样是 <code>[0, −0.5, 3, 6, 1, −2, 0, 1.5]</code>，但还原后是 <code>[0, −0.58, 3.5, 7.0, 1.17, −2.33, 0, 1.75]</code>：最大值 7 被精确保留。在 4096 个随机数上：平均绝对误差 NVFP4 0.106、MXFP4 0.126、MXFP8 0.028（|x| 均值 1.19）。</p>
+</div><div class="step" data-hl="acc"><div class="step-title">4. 提升</div><p>8192 个 [0.5, 1.5] 的乘积求和：13 位尾数的累加器不提升，相对误差 8.8e−4；每 128 个提升一次 6.2e−7。10 位尾数不提升时，和加到一定大小就“加不动了”，误差 47%；每 128 个提升一次 1.2e−4。</p>
+</div></div></div>
+<h2 id="c2-5">易错点</h2>
+<ul>
+<li><strong>E2M1 用均匀步长取整。</strong> 例如 <code>round(x / 0.5) * 0.5</code> 会产生 2.5、3.5、5 这些不存在的值。</li>
+<li><strong>平局取了下标较小的那个。</strong> 0.75 应该是 1（尾数位 0），不是 0.5（<code>test_e2m1_ties_go_to_even_mantissa</code>）。</li>
+<li><strong>MX 的 scale 用了 <code>ceil</code> 或 <code>log2(amax / 6)</code>。</strong> OCP MX 规范是 <code>floor(log2 amax) − emax</code>，所以最大值可能饱和——这是格式本身的特性，测试按规范检查。</li>
+<li><strong>零块的 scale 算出 −inf。</strong> amax = 0 时 scale = 1（MX）或 s = 0、q 全 0（NVFP4）。</li>
+<li><strong>提升边界从 0 数起。</strong> 第 <code>promote_every</code> 个累加之后提升（<code>(k + 1) % step == 0</code>），最后再提升一次剩下的。</li>
+</ul>
+<h2 id="c2-6">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 示例与关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">quantize_e2m1([0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0])   # [0, 1, 1, 2, 2, 4, 4]
+q, s = mx_quantize(np.array([7.0, 1.0, -0.4, 0.0] * 8), 32, &quot;e2m1&quot;)
+s, q[:4]                                                  # [1.], [6, 1, -0.5, 0]
+q, s, g = nvfp4_quantize(np.concatenate([np.zeros(16), np.linspace(-3, 3, 16)]))
+g, s                                                      # 3/2688, [0, 448]
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>E2M1 的 8 个非负值里，哪些是“尾数位为 0”的？</li>
+<li>为什么 MX 的 scale 选 <code>floor(log2 amax) − emax</code> 而不是让 amax 正好对上最大值？</li>
+<li>NVFP4 为什么要两级 scale？</li>
+<li>为什么提升间隔是 128，而不是 1（每次都提升）或 K（不提升）？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>quantize_e2m1</code>：<code>a = min(|x|, 6)</code>；对 8 个格点算距离 <code>d</code>；找最小距离的候选；候选里优先偶数下标；乘回符号。</li>
+<li><code>mx_quantize</code>：<code>reshape(-1, block)</code>，逐块 amax、指数、clip 到 [−127, 127]，<code>q = rnd(xb / scale)</code>。</li>
+<li><code>nvfp4_quantize</code>：先 g，再 <code>s = round_e4m3(amax_b / (6g))</code>，<code>s == 0</code> 的块 q 全 0（避免除以 0）。</li>
+<li><code>promoted_dot</code>：<code>acc = round_mantissa(acc + a[k]*b[k], bits)</code>；到点就 <code>total += acc; acc = 0</code>。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>详解：答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>关键问题答案</summary><div class="body"><ol>
+<li>下标偶数的：0、1、2、4（0.5、1.5、3、6 的尾数位是 1）。</li>
+<li>scale 必须是 2 的幂（UE8M0 只有指数），它只能把 amax 放进“最大指数那一档”；amax 落在这一档的上半段时会超过 6 而饱和。规范接受这点误差，换来只用 8 bit 存 scale、硬件乘 scale 只是加指数。</li>
+<li>E4M3 的 scale 自己的动态范围有限（最大 448）。先用全张量 FP32 scale g 把整个张量缩放到 “E4M3 scale × E2M1 元素” 能表示的 448·6 以内，块 scale 再负责块内的细节。</li>
+<li>每次都提升等于不用 Tensor Core 的累加（太慢）；完全不提升会 swamping。128 个 K 一次正好对应 DeepGEMM 里 wgmma 一个 K 块（同时也是 FP8 的 scale 粒度 128），提升的开销被摊到 128 次乘加上。</li>
+</ol>
+</div></details></div></details>
+<h2 id="c2-7">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/c2_block_scaling.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/c2_block_scaling.py</span><span class="muted small">152 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;C2 · Block-scaled low precision: MXFP8 / MXFP4 / NVFP4 and DeepGEMM&#x27;s FP8 promotion — reference solution.
+
+FP8 / FP4 让 Tensor Core 吞吐再翻倍、翻四倍，但 4 bit 只能表示 ±{0, 0.5, 1, 1.5, 2, 3, 4, 6}。
+能用的前提是“每一小块共享一个 scale”：MX 格式每 32 个元素一个 2 的幂（UE8M0）scale，
+NVFP4 每 16 个元素一个 E4M3 scale 再乘一个全张量 FP32 scale。Blackwell 的
+`tcgen05.mma.kind::mxf8f6f4 / mxf4nvf4 .block_scale` 在 Tensor Core 里直接乘这些 scale；
+Hopper 没有这个能力，DeepGEMM 每 128 个 K 把 Tensor Core 的部分和取出来，在 CUDA core 上乘 scale
+再加进 FP32 累加器（同时顺带解决了 FP8 wgmma 累加精度只有约 14 位的问题）。
+
+给定（given）：E2M1_GRID、round_e4m3(x)、round_mantissa(x, bits)。
+
+- quantize_e2m1(x)：逐元素就近取到 ±E2M1_GRID 上；正好在两个格点中间时取下标为偶数的那个
+  （即尾数位为 0 的那个，round-half-to-even）；|x| &gt; 6 饱和到 ±6；保留符号。
+- mx_quantize(x, block=32, elem=&quot;e4m3&quot;)：x 是 1D、长度为 block 的倍数（否则 ValueError）。每块：
+  amax = max|x|；amax == 0 时 scale = 1，否则 scale = 2^(floor(log2(amax)) − emax)，
+  emax = 8（e4m3）或 2（e2m1），指数夹到 [−127, 127]。q = round_elem(x / scale)
+  （e4m3 用 round_e4m3，e2m1 用 quantize_e2m1，都饱和）。返回 (q, scales)，scales 长度 = 块数。
+  elem 不是这两个时 ValueError。
+- nvfp4_quantize(x, block=16)：g = amax(|x|) / (448·6)（全为 0 时 g = 1）；每块
+  s = round_e4m3(amax_block / (6·g))；q = quantize_e2m1(x / (s·g))，s == 0 的块 q 全为 0。
+  返回 (q, s, g)。长度不是 block 的倍数时 ValueError。
+- dequantize(q, scales, block, global_scale=1.0)：x̂ = q · repeat(scales, block) · global_scale。
+- block_scaled_dot(qa, sa, qb, sb, block)：Σ_块 sa[i]·sb[i]·(qa_i · qb_i)，模拟 block-scaled MMA 的一个点积。
+- promoted_dot(a, b, acc_bits, promote_every=None)：模拟低精度累加器。依次对 k：
+  acc = round_mantissa(acc + a[k]·b[k], acc_bits)；每累加 promote_every 个 k（以及最后），
+  把 acc 加进一个 float64 的 total 并清零 acc。promote_every=None 表示只在最后提升一次。返回 total。
+
+API
+    E2M1_GRID, round_e4m3(x), round_mantissa(x, bits)          given
+    quantize_e2m1(x) -&gt; np.ndarray
+    mx_quantize(x, block=32, elem=&quot;e4m3&quot;) -&gt; (q, scales)
+    nvfp4_quantize(x, block=16) -&gt; (q, s, g)
+    dequantize(q, scales, block, global_scale=1.0) -&gt; np.ndarray
+    block_scaled_dot(qa, sa, qb, sb, block) -&gt; float
+    promoted_dot(a, b, acc_bits, promote_every=None) -&gt; float
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import numpy as np
+
+E2M1_GRID = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0])
+
+
+def round_e4m3(x):
+    &quot;&quot;&quot;就近舍入到 FP8 E4M3（round-half-even，饱和到 ±448，最小次正规数 2^-9）。&quot;&quot;&quot;
+    x = np.asarray(x, dtype=np.float64)
+    a = np.minimum(np.abs(x), 448.0)
+    with np.errstate(divide=&quot;ignore&quot;):
+        e = np.floor(np.log2(np.where(a &gt; 0, a, 1.0)))
+    e = np.maximum(e, -6.0)
+    q = np.exp2(e - 3)
+    r = np.minimum(np.round(a / q) * q, 448.0)
+    return np.where(a &gt; 0, np.sign(x) * r, 0.0)
+
+
+def round_mantissa(x, bits: int):
+    &quot;&quot;&quot;把 x 舍入到 bits 位显式尾数（round-half-even），模拟低精度累加器。&quot;&quot;&quot;
+    x = np.asarray(x, dtype=np.float64)
+    a = np.abs(x)
+    with np.errstate(divide=&quot;ignore&quot;):
+        e = np.floor(np.log2(np.where(a &gt; 0, a, 1.0)))
+    q = np.exp2(e - bits)
+    r = np.round(x / q) * q
+    out = np.where(a &gt; 0, r, 0.0)
+    return float(out) if out.ndim == 0 else out
+
+
+def quantize_e2m1(x):
+    &quot;&quot;&quot;就近取到 E2M1 格点，中点取偶数下标，饱和到 ±6。&quot;&quot;&quot;
+    x = np.asarray(x, dtype=np.float64)
+    a = np.minimum(np.abs(x), 6.0)
+    # 和每个格点的距离；平局时偏向偶数下标（尾数位 0）。格点不均匀（0.5 / 1 / 2 的间隔），
+    # 所以不能用“除以步长再 round”的写法——那是常见的错误实现。
+    d = np.abs(a[..., None] - E2M1_GRID)
+    best = d.min(axis=-1, keepdims=True)
+    cand = np.isclose(d, best, rtol=0, atol=1e-12)
+    idx_even = np.where(cand &amp; (np.arange(8) % 2 == 0), np.arange(8), 99).min(axis=-1)
+    idx_any = np.where(cand, np.arange(8), 99).min(axis=-1)
+    idx = np.where(idx_even &lt; 99, idx_even, idx_any)
+    return np.sign(x) * E2M1_GRID[idx]
+
+
+def mx_quantize(x, block: int = 32, elem: str = &quot;e4m3&quot;):
+    &quot;&quot;&quot;OCP MX：每 block 个元素一个 2 的幂 scale。&quot;&quot;&quot;
+    x = np.asarray(x, dtype=np.float64)
+    if x.ndim != 1 or len(x) % block:
+        raise ValueError(&quot;length must be a multiple of the block size&quot;)
+    if elem == &quot;e4m3&quot;:
+        emax, rnd = 8, round_e4m3
+    elif elem == &quot;e2m1&quot;:
+        emax, rnd = 2, quantize_e2m1
+    else:
+        raise ValueError(&quot;elem must be e4m3 or e2m1&quot;)
+    xb = x.reshape(-1, block)
+    amax = np.abs(xb).max(axis=1)
+    with np.errstate(divide=&quot;ignore&quot;):
+        e = np.floor(np.log2(np.where(amax &gt; 0, amax, 1.0))) - emax
+    # 2 的幂 scale = 只存 8 位指数（UE8M0）。scale 让块内最大值落在元素格式最大指数的那一档，
+    # 所以最大值可能被饱和截掉一点：e2m1 块 amax = 7 → floor(log2 7) − 2 = 0 → scale 1 → 7 饱和成 6，
+    # 误差 1。NVFP4 的 E4M3 scale 有尾数（amax/6 可以不是 2 的幂），正是为了减小这种误差。
+    e = np.clip(np.where(amax &gt; 0, e, 0.0), -127, 127)
+    scales = np.exp2(e)
+    q = rnd(xb / scales[:, None])
+    return q.reshape(-1), scales
+
+
+def nvfp4_quantize(x, block: int = 16):
+    &quot;&quot;&quot;NVFP4：每 16 个元素一个 E4M3 scale，外加一个全张量 FP32 scale。&quot;&quot;&quot;
+    x = np.asarray(x, dtype=np.float64)
+    if x.ndim != 1 or len(x) % block:
+        raise ValueError(&quot;length must be a multiple of the block size&quot;)
+    amax_t = np.abs(x).max()
+    # 两级 scale：g 把全张量的范围压进 “E4M3 scale × E2M1 元素” 能表示的 448·6 以内；
+    # 每块的 E4M3 scale 再把块内最大值对齐到 6。块更小（16 vs 32）、scale 有 3 位尾数，
+    # 所以 NVFP4 的误差通常明显小于 MXFP4。
+    g = amax_t / (448.0 * 6.0) if amax_t &gt; 0 else 1.0
+    xb = x.reshape(-1, block)
+    s = round_e4m3(np.abs(xb).max(axis=1) / (6.0 * g))
+    safe = np.where(s &gt; 0, s, 1.0)
+    q = np.where(s[:, None] &gt; 0, quantize_e2m1(xb / (safe[:, None] * g)), 0.0)
+    return q.reshape(-1), s, g
+
+
+def dequantize(q, scales, block: int, global_scale: float = 1.0):
+    &quot;&quot;&quot;x̂ = q · scale（逐块）· 全局 scale。&quot;&quot;&quot;
+    return np.asarray(q) * np.repeat(np.asarray(scales), block) * global_scale
+
+
+def block_scaled_dot(qa, sa, qb, sb, block: int) -&gt; float:
+    &quot;&quot;&quot;block-scaled MMA 的一个点积：每块内整数/低精度点积，再乘两边的 scale。&quot;&quot;&quot;
+    # Tensor Core 里就是这么做的：块内用 FP4/FP8 乘加，块与块之间乘 scale 后累加到 FP32。
+    qa = np.asarray(qa).reshape(-1, block)
+    qb = np.asarray(qb).reshape(-1, block)
+    return float(np.sum(np.asarray(sa) * np.asarray(sb) * np.sum(qa * qb, axis=1)))
+
+
+def promoted_dot(a, b, acc_bits: int, promote_every=None) -&gt; float:
+    &quot;&quot;&quot;低精度累加器 + 每 promote_every 个 k 提升到 float64。&quot;&quot;&quot;
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    n = len(a)
+    step = promote_every or n
+    total = 0.0
+    acc = 0.0
+    for k in range(n):
+        # 累加器越大，新加的小量越容易被舍入吃掉（swamping）：acc=4096、尾数 13 位时，
+        # 步长是 1，加 0.4 直接没了。定期把 acc 清零、加进高精度 total，acc 就一直很小。
+        acc = round_mantissa(acc + a[k] * b[k], acc_bits)
+        if (k + 1) % step == 0 or k == n - 1:
+            total += acc
+            acc = 0.0
+    return total</code></pre></div></div></details>
+<h2 id="c2-8">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li><strong>“FP8 训练里 per-tensor、per-channel、per-block（1×128 / 128×128）scale 怎么选？”</strong> 越细误差越小，但 scale 越多、kernel 越复杂。DeepSeek-V3 用激活 1×128、权重 128×128，正好对应 DeepGEMM 的 “1d2d”。</li>
+<li><strong>“Hopper FP8 wgmma 的累加器到底多少位？”</strong> DeepSeek-V3 报告说约 14 位有效精度，这就是 DeepGEMM 要做 CUDA-core 提升的原因；本题用 <code>round_mantissa(…, 13)</code> 模拟。</li>
+<li><strong>“5090 上能跑 NVFP4 GEMM 吗？”</strong> 能：sm120 的 <code>mma.sync … kind::mxf4nvf4.block_scale</code>，CUTLASS 例子 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/79_blackwell_geforce_gemm/79a_blackwell_geforce_nvfp4_bf16_gemm.cu">79a</a> 就是 NVFP4 × NVFP4 → BF16（cluster 只能 1×1×1）。可以作为 G 题的扩展练习。</li>
+<li><strong>“B200 上 scale 存在哪？”</strong> 用 <code>tcgen05.cp</code> 从 SMEM 拷进 TMEM，MMA 指令描述符里带 scale 的 TMEM 地址（C1 的追问）。</li>
+</ul>
+
+<nav class="pager"><a href="c1_tmem_accumulators.html">← 上一题 C1</a><a href="c3_tile_scheduler.html">C3 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#c2-1">题面速览</a>
+<a class="o2" href="#c2-2">直觉与类比</a>
+<a class="o2" href="#c2-3">图解：一次 block-scaled 点积</a>
+<a class="o2" href="#c2-4">逐步演示</a>
+<a class="o2" href="#c2-5">易错点</a>
+<a class="o2" href="#c2-6">三级提示</a>
+<a class="o2" href="#c2-7">参考解</a>
+<a class="o2" href="#c2-8">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

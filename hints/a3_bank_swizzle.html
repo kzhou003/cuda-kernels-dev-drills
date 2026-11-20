@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A3 · SMEM bank conflict 与 CuTe Swizzle&lt;B,M,S&gt;</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cuda-kernels-dev-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">CUDA Kernel 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一个问题，五个部件，四代答案</a>
+<a class="nav-l3" href="../knowledge/generations.html">每一代 GPU：加了什么、为什么、代码怎么变</a>
+<a class="nav-l3" href="../knowledge/flash_attention.html">FlashAttention 1 → 4：同一个算法，为硬件改写四次</a>
+<a class="nav-l3" href="../knowledge/between_kernels.html">Kernel 之间：CUDA Graph、PDL、persistent 与编译器</a>
+<div class="nav-group">Track A · 算力账与 Tensor Core 的数据布局</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_roofline_tiles.html"><span class="nid">A1</span>Roofline、tile 算术强度与寄存器 / SMEM 预算</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_mma_fragments.html"><span class="nid">A2</span>mma.sync m16n8k16 的 fragment 布局与 ldmatrix</a>
+<a class="nav-l3 cur" data-id="A3" href="../hints/a3_bank_swizzle.html"><span class="nid">A3</span>SMEM bank conflict 与 CuTe Swizzle&lt;B,M,S&gt;</a>
+<div class="nav-group">Track B · Ampere → Hopper：异步搬运与同步</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_cp_async_pipeline.html"><span class="nid">B1</span>cp.async 多级流水：commit / wait_group 与 K 循环时间线</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_mbarrier_pipeline.html"><span class="nid">B2</span>mbarrier：相位位、事务字节与 TMA 生产者/消费者环</a>
+<a class="nav-l3" data-id="B3" href="../hints/b3_tma_box_copy.html"><span class="nid">B3</span>TMA box 拷贝：越界填零、128B swizzle、cluster multicast</a>
+<a class="nav-l3" data-id="B4" href="../hints/b4_warp_specialization.html"><span class="nid">B4</span>Warp specialization：Pingpong vs Cooperative 与 setmaxnreg</a>
+<div class="nav-group">Track C · Blackwell 与 kernel 之间</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_tmem_accumulators.html"><span class="nid">C1</span>Blackwell TMEM：列分配、双缓冲累加器与 2-CTA MMA</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_block_scaling.html"><span class="nid">C2</span>MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升</a>
+<a class="nav-l3" data-id="C3" href="../hints/c3_tile_scheduler.html"><span class="nid">C3</span>Tile 调度：wave quantization、raster swizzle、persistent、Stream-K</a>
+<a class="nav-l3" data-id="C4" href="../hints/c4_launch_timeline.html"><span class="nid">C4</span>Kernel 之间：stream vs CUDA Graph vs PDL 的时间线与依赖</a>
+<div class="nav-group">Track D · FlashAttention 1 → 4 的算法</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_online_softmax.html"><span class="nid">D1</span>Online softmax、(O, LSE) 状态与 split-KV 合并</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_flash_forward.html"><span class="nid">D2</span>FlashAttention 前向分块：循环顺序、causal 跳块与 HBM 流量</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_fa4_softmax_tricks.html"><span class="nid">D3</span>FA4 的 softmax：FMA 上的 exp2 多项式与条件 rescale</a>
+<div class="nav-group">Track G · RTX 5090 实战（真实 CUDA）</div>
+<a class="nav-l3" data-id="G1" href="../hints/g1_mma_gemm.html"><span class="nid">G1</span>5090：ldmatrix + mma.sync 的 BF16 GEMM</a>
+<a class="nav-l3" data-id="G2" href="../hints/g2_multistage_gemm.html"><span class="nid">G2</span>5090：cp.async 多级流水 GEMM（2 / 3 / 4 级）</a>
+<a class="nav-l3" data-id="G3" href="../hints/g3_flash_attn.html"><span class="nid">G3</span>5090：FlashAttention-2 前向（mma.sync + online softmax）</a>
+<a class="nav-l3" data-id="G4" href="../hints/g4_pdl_graph.html"><span class="nid">G4</span>5090：PDL + CUDA Graph，测出 kernel 之间省下的时间</a></nav>
+<main>
+<header class="cover"><div class="kicker">A3 · Track A · 算力账与 Tensor Core 的数据布局 · 45 分钟 · 中</div><h1>A3 · SMEM bank conflict 与 CuTe Swizzle&lt;B,M,S&gt;</h1><p class="lede">Tensor Core 再快，操作数也要先从 SMEM 读出来。SMEM 有 32 个 bank，摆放方式不对，一次读取会被拆成 8 次。swizzle 用一个 XOR 把同一“列块”的 8 行打散到 8 组 bank 上，CuTe、TMA、wgmma 描述符全都靠它。</p><p class="small">文件: <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/mine/a3_bank_swizzle.py"><code>mine/a3_bank_swizzle.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/tests/test_a3_bank_swizzle.py"><code>tests/test_a3_bank_swizzle.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/solutions/a3_bank_swizzle.py"><code>solutions/a3_bank_swizzle.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="A3"> 我已完成这道题</label></header>
+<h2 id="a3-1">题面速览</h2>
+<ul>
+<li><strong>在系统中的位置</strong>：CuTe 的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle.hpp#L55">Swizzle&lt;BBits, MBase, SShift&gt;</a> 用在每一个 SMEM layout 上（<code>composition(Swizzle&lt;3,3,3&gt;{}, …)</code>）；TMA 描述符里的 <code>CU_TENSOR_MAP_SWIZZLE_128B</code>（B3）和 wgmma / tcgen05 的 SMEM 描述符里的 swizzle 模式是同一个函数。G1 / G2 / G3 在 5090 上用的是另一种办法：padding。</li>
+<li><strong>你要实现</strong>：<code>wavefronts_32bit</code>（普通 32-bit 访问的冲突数）、<code>ldmatrix_wavefronts</code>（ldmatrix 每 8 行一个相位）、<code>swizzle</code>、<code>swizzled_offset</code>、<code>padded_offset</code>。</li>
+<li><strong>难点在这几条规则</strong>：
+<ol>
+<li>冲突只算<strong>同一 bank 上不同的字</strong>；32 个线程读同一个字是广播，1 次。</li>
+<li>ldmatrix 的一个 8×8 矩阵 = 8 行 × 16 B = 128 B，正好绕 32 个 bank 一圈；8 个 16 B 块落在 8 个不同的“槽”（每槽 4 个 bank）才是 1 次。</li>
+<li><code>Swizzle&lt;B,M,S&gt;</code>：保留低 M 位，把第 <code>[M+S, M+S+B)</code> 位右移 S 位 XOR 到第 <code>[M, M+B)</code> 位。</li>
+<li>XOR 是自己的逆，所以写入和读出用同一个函数。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：连续字无冲突 · 广播不算冲突 · 32×32 float 读一列 32 路冲突 · padding 1 个 float 消除 · 步长 2 是 2 路 · 每行 128 B 的 tile 用 ldmatrix 是 8 路 · 对齐检查 · swizzle 已知值 · swizzle 是置换且自逆 · 16 B 向量不被拆开 · swizzle 后每个列块都无冲突 · 行读也无冲突。</p>
+<h2 id="a3-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 停车场的错位车位</div><p>SMEM 像一个有 8 排车位的停车场（8 个槽，每槽 4 个 bank），每辆车（16 B 块）按“第几列”停在固定的排上。按行存的 tile 里，每一行的第 0 个块都停在第 0 排——ldmatrix 一次要取 8 行的第 0 块，8 辆车全挤在一排出口，只能排队一辆一辆开出去（8 个 wavefront）。swizzle 的做法是<strong>第 r 行的车错开 r 个位置停</strong>（块号 XOR 行号）：取同一列块时，8 辆车分别在 8 个不同的出口，一次全部开出去。padding 是另一种办法：每行多空几个车位，让下一行自然错开——简单，但浪费车位，而且 TMA 不认识这种停法。</p>
+</div>
+<h2 id="a3-3">图解：一个 bf16 tile，每行 64 个元素（128 B）</h2>
+
+<figure class="flow"><div class="flow-head">Swizzle&lt;3,3,3&gt; 怎么读一个元素偏移<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;Swizzle&lt;3,3,3&gt; 怎么读一个元素偏移&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;off&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;元素偏移 o&quot;, &quot;s&quot;: &quot;= 行·64 + 列&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;low&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;低 3 位：保留&quot;, &quot;s&quot;: &quot;16 B 内的 8 个元素&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;mid&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;第 3–5 位：块号&quot;, &quot;s&quot;: &quot;c = 列 / 8&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;hi&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;第 6–8 位：行号低 3 位&quot;, &quot;s&quot;: &quot;r % 8&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;out&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;新块号 = c ⊕ (r%8)&quot;, &quot;s&quot;: &quot;8 行落在 8 个槽&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;off&quot;, &quot;b&quot;: &quot;low&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;off:b&quot;, &quot;b&quot;: &quot;mid:l&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;mid&quot;, &quot;b&quot;: &quot;hi&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;hi&quot;, &quot;b&quot;: &quot;out&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;low&quot;, &quot;b&quot;: &quot;out&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 96.0, &quot;nw&quot;: 170.0}}"></div><figcaption>单位是元素：M = 3（8 个 bf16 = 16 B 不拆开，ldmatrix / cp.async 的 16 B 向量完整），B = 3（8 个块要打散），S = 3（钥匙在块号上面 3 位，即一行 64 个元素之上的行号）。TMA 的 128B swizzle 是同一个函数，只是按字节写成 Swizzle&lt;3,4,3&gt;。</figcaption></figure>
+<h2 id="a3-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 8 行、每行 128 B 的 bf16 tile，ldmatrix 读第 0 个列块</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;row&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;按行存放&quot;, &quot;s&quot;: &quot;块 0 都在槽 0&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;pad&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;padding +8&quot;, &quot;s&quot;: &quot;每行 144 B&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;swz&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Swizzle&lt;3,3,3&gt;&quot;, &quot;s&quot;: &quot;块 0 → 槽 r&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;res&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;wavefront 数&quot;, &quot;s&quot;: &quot;8 / 1 / 1&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;row&quot;, &quot;b&quot;: &quot;pad&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;pad&quot;, &quot;b&quot;: &quot;swz&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;swz&quot;, &quot;b&quot;: &quot;res&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 90.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="row"><div class="step-title">1. 按行存放</div><p>第 r 行第 0 块的字节地址 = 128·r，槽 = (128r / 16) % 8 = 0。8 行全在槽 0：<code>ldmatrix_wavefronts</code> = <strong>8</strong>。
+<span class="cells"><span class="cell bad">0</span><span class="cell bad">0</span><span class="cell bad">0</span><span class="cell bad">0</span><span class="cell bad">0</span><span class="cell bad">0</span><span class="cell bad">0</span><span class="cell bad">0</span></span></p>
+</div><div class="step" data-hl="pad"><div class="step-title">2. padding 8 个元素</div><p>行跨度变成 72 个元素 = 144 B，槽 = 9r % 8 = r：8 个不同的槽，<strong>1</strong> 次。代价是 12.5% 的 SMEM，而且 TMA 不能按这个布局写。
+<span class="cells"><span class="cell ok">0</span><span class="cell ok">1</span><span class="cell ok">2</span><span class="cell ok">3</span><span class="cell ok">4</span><span class="cell ok">5</span><span class="cell ok">6</span><span class="cell ok">7</span></span></p>
+</div><div class="step" data-hl="swz"><div class="step-title">3. swizzle</div><p>第 r 行的块 0 被放到块 0 ⊕ r = r：同样 8 个不同的槽，<strong>1</strong> 次，一个字节都不浪费。第 3 行的 8 个块依次去了 <code>3 2 1 0 7 6 5 4</code>。
+<span class="cells"><span class="cell ok">0</span><span class="cell ok">1</span><span class="cell ok">2</span><span class="cell ok">3</span><span class="cell ok">4</span><span class="cell ok">5</span><span class="cell ok">6</span><span class="cell ok">7</span></span></p>
+</div><div class="step" data-hl="res"><div class="step-title">4. 普通 32-bit 访问</div><p>另一个经典例子：32×32 的 float tile 读一列（转置）：<code>wavefronts_32bit</code> = <strong>32</strong>；每行多 1 个 float（ld = 33）后 = <strong>1</strong>。</p>
+</div></div></div>
+<h2 id="a3-5">易错点</h2>
+<ul>
+<li><strong>数线程数而不是数不同的字。</strong> 广播会被误算成 32 路冲突（<code>test_broadcast_is_not_a_conflict</code>）。</li>
+<li><strong>ldmatrix 按 32-bit 规则算。</strong> ldmatrix 每次处理 8 行（一个 128 B 相位），按 16 B 块和 8 个槽算；x4 是 4 个相位，最少 4 次（<code>test_ldmatrix_contiguous_matrix_is_one_wavefront</code>）。</li>
+<li><strong>swizzle 把 16 B 向量拆开了。</strong> M 选小了（例如 bf16 用 M = 2），一个 cp.async 的 16 B 写入会落到两个不连续的位置。<code>test_swizzle_keeps_16_byte_vectors_contiguous</code> 抓这个。</li>
+<li><strong>掩码位置错一位。</strong> 钥匙是第 <code>[M+S, M+S+B)</code> 位，不是 <code>[S, S+B)</code>。<code>test_swizzle_known_values</code> 里第 9 行要表现得像第 1 行。</li>
+<li><strong>写用 swizzle、读没用。</strong> 两边必须是同一个函数；B3 里 TMA 写、wgmma 描述符读，靠的就是“约定同一个 swizzle 模式”。</li>
+</ul>
+<h2 id="a3-6">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 示例与关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">wavefronts_32bit([(r * 32 + 5) * 4 for r in range(32)])          # 32
+wavefronts_32bit([padded_offset(r, 5, 32, 1) * 4 for r in range(32)])   # 1
+ldmatrix_wavefronts([r * 128 for r in range(8)])                # 8
+ldmatrix_wavefronts([2 * swizzled_offset(r, 0, 64, 3, 3, 3) for r in range(8)])  # 1
+swizzle(64, 3, 3, 3)                                            # 72
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>地址 a 的 bank 是多少？什么时候两个访问冲突？</li>
+<li>ldmatrix 的 8 行为什么是“一组”？</li>
+<li><code>Swizzle&lt;3,3,3&gt;</code> 用在 bf16 上，M、B、S 各自对应 tile 的什么？</li>
+<li>换成 FP8（每个元素 1 字节），同样 128 B 一行，swizzle 参数怎么变？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>wavefronts_32bit</code>：<code>defaultdict(set)</code>，键 = <code>(a//4) % 32</code>，值 = <code>{a//4}</code>；答案是最大集合的大小。</li>
+<li><code>ldmatrix_wavefronts</code>：先校验（长度是 8 的倍数、地址 16 对齐），每 8 个一组，键 = <code>(a//16) % 8</code>，值 = <code>{a//16}</code>，每组取最大，再求和。</li>
+<li><code>swizzle</code>：<code>mask = ((1 &lt;&lt; B) - 1) &lt;&lt; (M + S)</code>；<code>return o ^ ((o &amp; mask) &gt;&gt; S)</code>。</li>
+<li><code>swizzled_offset</code> / <code>padded_offset</code> 各一行。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>详解：答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>关键问题答案</summary><div class="body"><ol>
+<li>bank = <code>(a // 4) % 32</code>。同一 wavefront 里两个访问落在同一 bank 且是<strong>不同</strong>的 4 字节字，就冲突。</li>
+<li>ldmatrix 的每个 8×8 矩阵是 8 行 × 16 B = 128 B，硬件一次 SMEM 事务最多 128 B（32 bank × 4 B）。所以每个矩阵是一个相位，相位内 8 个 16 B 块要落在 8 个不同的 4-bank 组上。</li>
+<li>M = 3：低 3 位 = 8 个 bf16 = 16 B（不拆开的向量）；B = 3：一行 128 B 有 8 个 16 B 块；S = 3：从块号再往上 3 位，就是“行号”（每行 64 个元素 = 2^6）。</li>
+<li>FP8 一行 128 B 是 128 个元素，16 B = 16 个元素：Swizzle&lt;3,4,3&gt;（M = 4）。用字节偏移写就永远是 Swizzle&lt;3,4,3&gt;，这正是 TMA 128B swizzle 的定义。</li>
+</ol>
+</div></details></div></details>
+<h2 id="a3-7">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/a3_bank_swizzle.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/a3_bank_swizzle.py</span><span class="muted small">84 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;A3 · Shared-memory bank conflicts and the CuTe Swizzle&lt;B, M, S&gt; — reference solution.
+
+SMEM 分成 32 个 bank，每个 bank 4 字节宽，一个时钟每个 bank 只能服务一个 4 字节字。
+同一 warp 的访问落在同一 bank 的不同字上，就要拆成多次（wavefront）。Tensor Core kernel 里
+最常见的冲突：tile 按行存（每行 128 B），ldmatrix 却按“列方向”一次读 8 行的同一个 16 B 块，
+8 行全落在同一组 bank 上。解决办法有两种：padding（每行多留几个元素）和 swizzle（把列块编号
+和行号做 XOR）。CuTe / CUTLASS / TMA 都用 swizzle，因为它不浪费 SMEM，而且 TMA 能直接按它写。
+
+- wavefronts_32bit(byte_addrs): 一个 warp 的 32 个 4 字节访问需要几个 wavefront。
+  bank = (addr // 4) % 32；同一 bank 上**不同**的字（addr // 4 不同）各需一次，同一个字是广播，不算冲突。
+  结果 = 各 bank 不同字数的最大值（至少 1；空列表返回 0）。
+- ldmatrix_wavefronts(row_byte_addrs): ldmatrix 每个 8×8 矩阵读 8 行、每行 16 B（一个 128 B 相位）。
+  row_byte_addrs 按 8 个一组（一组一个矩阵）。每组里 16 B 块所在的“槽” = (addr // 16) % 8，
+  同一槽上不同的 16 B 块（addr // 16 不同）各需一次。结果 = 各组最大值之和。
+  地址不是 16 的倍数、或长度不是 8 的倍数时抛 ValueError。
+- swizzle(offset, B, M, S): CuTe Swizzle&lt;B, M, S&gt;（S &gt; 0 的情形）：
+  取 offset 的第 [M+S, M+S+B) 位，右移 S 位后 XOR 到第 [M, M+B) 位上；其余位不变。
+- swizzled_offset(row, col, ld, B, M, S) = swizzle(row·ld + col, B, M, S)（元素偏移）。
+- padded_offset(row, col, ld, pad) = row·(ld + pad) + col。
+
+API
+    wavefronts_32bit(byte_addrs) -&gt; int
+    ldmatrix_wavefronts(row_byte_addrs) -&gt; int
+    swizzle(offset, B, M, S) -&gt; int
+    swizzled_offset(row, col, ld, B, M, S) -&gt; int
+    padded_offset(row, col, ld, pad) -&gt; int
+&quot;&quot;&quot;
+from __future__ import annotations
+
+from collections import defaultdict
+
+
+def wavefronts_32bit(byte_addrs) -&gt; int:
+    &quot;&quot;&quot;32 个 4 字节访问需要的 wavefront 数（广播不算冲突）。&quot;&quot;&quot;
+    # 只数“不同的字”：32 个线程读同一个地址是一次广播，1 个 wavefront。
+    # 常见错误是数“落在同一 bank 的线程数”，那样广播会被误判成 32 路冲突。
+    if not byte_addrs:
+        return 0
+    words = defaultdict(set)
+    for a in byte_addrs:
+        w = a // 4
+        words[w % 32].add(w)
+    return max(len(s) for s in words.values())
+
+
+def ldmatrix_wavefronts(row_byte_addrs) -&gt; int:
+    &quot;&quot;&quot;ldmatrix 每 8 行一组（一个 128 B 相位），同槽不同 16 B 块要串行。&quot;&quot;&quot;
+    addrs = list(row_byte_addrs)
+    if len(addrs) % 8 or any(a % 16 for a in addrs):
+        raise ValueError(&quot;ldmatrix rows are 16-byte aligned, 8 per matrix&quot;)
+    total = 0
+    for i in range(0, len(addrs), 8):
+        # 8 行 × 16 B = 128 B = 正好 32 个 bank 一圈。8 个 16 B 块落在 8 个不同的“槽”
+        # （每槽 4 个 bank）时一次读完；按行存放、每行 128 B 的 tile，8 行同一列块全在同一槽 → 8 次。
+        slots = defaultdict(set)
+        for a in addrs[i:i + 8]:
+            chunk = a // 16
+            slots[chunk % 8].add(chunk)
+        total += max(len(s) for s in slots.values())
+    return total
+
+
+def swizzle(offset: int, B: int, M: int, S: int) -&gt; int:
+    &quot;&quot;&quot;CuTe Swizzle&lt;B,M,S&gt;：把 [M+S, M+S+B) 位 XOR 到 [M, M+B) 位。&quot;&quot;&quot;
+    # 读法（以 bf16、Swizzle&lt;3,3,3&gt; 为例，单位是元素）：
+    #   M=3：低 3 位（8 个元素 = 16 B）原样保留——ldmatrix / cp.async 的 16 B 向量不被拆开；
+    #   B=3：有 8 个 16 B 块要打散；
+    #   S=3：用“往上 3 位”的那几位做钥匙，即 offset 的第 6..8 位 = 行号的低 3 位（每行 64 个元素）。
+    # 结果：第 r 行的第 c 个 16 B 块被放到第 c ^ (r % 8) 个位置。同一“列块”的 8 行分到 8 个不同槽。
+    # XOR 是自己的逆，所以写和读用同一个函数；它在每 2^(B+M+S) 个元素内是一个置换，不浪费空间。
+    mask = ((1 &lt;&lt; B) - 1) &lt;&lt; (M + S)
+    return offset ^ ((offset &amp; mask) &gt;&gt; S)
+
+
+def swizzled_offset(row: int, col: int, ld: int, B: int, M: int, S: int) -&gt; int:
+    &quot;&quot;&quot;先按行主序算偏移，再 swizzle。&quot;&quot;&quot;
+    return swizzle(row * ld + col, B, M, S)
+
+
+def padded_offset(row: int, col: int, ld: int, pad: int) -&gt; int:
+    &quot;&quot;&quot;每行多留 pad 个元素。&quot;&quot;&quot;
+    # padding 的代价：多占 SMEM（bf16、每行 64 元素加 8 → 12.5%），而且 TMA 没法按 padding 写入，
+    # 所以 Hopper 以后基本只用 swizzle。Ampere 的手写 kernel、FA2 的部分路径还在用 padding。
+    return row * (ld + pad) + col</code></pre></div></div></details>
+<h2 id="a3-8">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li><strong>“CUTLASS 怎么选 swizzle？”</strong> 按 SMEM tile 的 K 方向字节数选最大的那个：K 方向 ≥ 128 B 用 128B swizzle（<code>Swizzle&lt;3,4,3&gt;</code>），64 B 用 <code>Swizzle&lt;2,4,3&gt;</code>，32 B 用 <code>Swizzle&lt;1,4,3&gt;</code>。见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle.hpp#L55">cute/swizzle.hpp</a> 和 sm90 的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_common.inl#L273">ss_smem_selector</a>。</li>
+<li><strong>“epilogue 写 SMEM 也会冲突吗？”</strong> 会：累加器的 C 布局（每线程 2 个相邻 float）按行写，每个 quad 写同一行，8 个 quad 写 8 行的同一列段——同样需要 swizzle 或 padding。</li>
+<li><strong>“5090 上为什么 G1 用 padding 不用 swizzle？”</strong> 代码更好懂；5090 的 SMEM 预算（100 KB/SM）里 20% 的 padding 在 2 级流水下还放得下。写 TMA 版本时必须换成 swizzle。</li>
+<li><strong>“bank 冲突在 Nsight Compute 里看什么？”</strong> <code>l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld</code> 和 “Shared Load Wavefronts / Requests” 的比值。</li>
+</ul>
+
+<nav class="pager"><a href="a2_mma_fragments.html">← 上一题 A2</a><a href="b1_cp_async_pipeline.html">B1 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#a3-1">题面速览</a>
+<a class="o2" href="#a3-2">直觉与类比</a>
+<a class="o2" href="#a3-3">图解：一个 bf16 tile，每行 64 个元素（128 B）</a>
+<a class="o2" href="#a3-4">逐步演示</a>
+<a class="o2" href="#a3-5">易错点</a>
+<a class="o2" href="#a3-6">三级提示</a>
+<a class="o2" href="#a3-7">参考解</a>
+<a class="o2" href="#a3-8">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,933 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>G3 · 5090：FlashAttention-2 前向（mma.sync + online softmax）</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cuda-kernels-dev-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">CUDA Kernel 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一个问题，五个部件，四代答案</a>
+<a class="nav-l3" href="../knowledge/generations.html">每一代 GPU：加了什么、为什么、代码怎么变</a>
+<a class="nav-l3" href="../knowledge/flash_attention.html">FlashAttention 1 → 4：同一个算法，为硬件改写四次</a>
+<a class="nav-l3" href="../knowledge/between_kernels.html">Kernel 之间：CUDA Graph、PDL、persistent 与编译器</a>
+<div class="nav-group">Track A · 算力账与 Tensor Core 的数据布局</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_roofline_tiles.html"><span class="nid">A1</span>Roofline、tile 算术强度与寄存器 / SMEM 预算</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_mma_fragments.html"><span class="nid">A2</span>mma.sync m16n8k16 的 fragment 布局与 ldmatrix</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_bank_swizzle.html"><span class="nid">A3</span>SMEM bank conflict 与 CuTe Swizzle&lt;B,M,S&gt;</a>
+<div class="nav-group">Track B · Ampere → Hopper：异步搬运与同步</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_cp_async_pipeline.html"><span class="nid">B1</span>cp.async 多级流水：commit / wait_group 与 K 循环时间线</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_mbarrier_pipeline.html"><span class="nid">B2</span>mbarrier：相位位、事务字节与 TMA 生产者/消费者环</a>
+<a class="nav-l3" data-id="B3" href="../hints/b3_tma_box_copy.html"><span class="nid">B3</span>TMA box 拷贝：越界填零、128B swizzle、cluster multicast</a>
+<a class="nav-l3" data-id="B4" href="../hints/b4_warp_specialization.html"><span class="nid">B4</span>Warp specialization：Pingpong vs Cooperative 与 setmaxnreg</a>
+<div class="nav-group">Track C · Blackwell 与 kernel 之间</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_tmem_accumulators.html"><span class="nid">C1</span>Blackwell TMEM：列分配、双缓冲累加器与 2-CTA MMA</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_block_scaling.html"><span class="nid">C2</span>MXFP8 / NVFP4 block scaling 与 DeepGEMM 的 FP8 提升</a>
+<a class="nav-l3" data-id="C3" href="../hints/c3_tile_scheduler.html"><span class="nid">C3</span>Tile 调度：wave quantization、raster swizzle、persistent、Stream-K</a>
+<a class="nav-l3" data-id="C4" href="../hints/c4_launch_timeline.html"><span class="nid">C4</span>Kernel 之间：stream vs CUDA Graph vs PDL 的时间线与依赖</a>
+<div class="nav-group">Track D · FlashAttention 1 → 4 的算法</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_online_softmax.html"><span class="nid">D1</span>Online softmax、(O, LSE) 状态与 split-KV 合并</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_flash_forward.html"><span class="nid">D2</span>FlashAttention 前向分块：循环顺序、causal 跳块与 HBM 流量</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_fa4_softmax_tricks.html"><span class="nid">D3</span>FA4 的 softmax：FMA 上的 exp2 多项式与条件 rescale</a>
+<div class="nav-group">Track G · RTX 5090 实战（真实 CUDA）</div>
+<a class="nav-l3" data-id="G1" href="../hints/g1_mma_gemm.html"><span class="nid">G1</span>5090：ldmatrix + mma.sync 的 BF16 GEMM</a>
+<a class="nav-l3" data-id="G2" href="../hints/g2_multistage_gemm.html"><span class="nid">G2</span>5090：cp.async 多级流水 GEMM（2 / 3 / 4 级）</a>
+<a class="nav-l3 cur" data-id="G3" href="../hints/g3_flash_attn.html"><span class="nid">G3</span>5090：FlashAttention-2 前向（mma.sync + online softmax）</a>
+<a class="nav-l3" data-id="G4" href="../hints/g4_pdl_graph.html"><span class="nid">G4</span>5090：PDL + CUDA Graph，测出 kernel 之间省下的时间</a></nav>
+<main>
+<header class="cover"><div class="kicker">G3 · Track G · RTX 5090 实战（真实 CUDA） · 90 分钟 · 难</div><h1>G3 · 5090：FlashAttention-2 前向（mma.sync + online softmax）</h1><p class="lede">把 D1 / D2 的递推写进 Tensor Core 的寄存器 fragment：S = QKᵀ 用 mma.sync，行最大值和行和在 quad 里用两次 shuffle 归约，P 不经过 SMEM 直接变成下一次 mma 的 A 操作数，V 用转置的 ldmatrix 读。这就是 FlashAttention-2 在 Ampere / 5090 上的核心。</p><p class="small">文件: <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/mine/g3_flash_attn.py"><code>mine/g3_flash_attn.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/tests/test_g3_flash_attn.py"><code>tests/test_g3_flash_attn.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cuda-kernels-dev-drills/blob/main/solutions/g3_flash_attn.py"><code>solutions/g3_flash_attn.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="G3"> 我已完成这道题</label></header>
+<h2 id="g3-1">题面速览</h2>
+<ul>
+<li><strong>在系统中的位置</strong>：FA2 的 <a class="src" href="https://github.com/Dao-AILab/flash-attention/blob/dbabcc788590e793eee11566d7253906187e612e/csrc/flash_attn/src/flash_fwd_kernel.h#L57">compute_attn_1rowblock</a>（CuTe 写法）；softmax 部分是 <a class="src" href="https://github.com/Dao-AILab/flash-attention/blob/dbabcc788590e793eee11566d7253906187e612e/csrc/flash_attn/src/softmax.h#L137">softmax_rescale_o</a>，quad 内归约是 <a class="src" href="https://github.com/Dao-AILab/flash-attention/blob/dbabcc788590e793eee11566d7253906187e612e/csrc/flash_attn/src/softmax.h#L39">quad_allreduce_</a>，P 的寄存器重排是 <a class="src" href="https://github.com/Dao-AILab/flash-attention/blob/dbabcc788590e793eee11566d7253906187e612e/csrc/flash_attn/src/utils.h#L200">convert_layout_acc_Aregs</a>。FA 的 CuTe DSL 版本也有 sm120 的前向：<a class="src" href="https://github.com/Dao-AILab/flash-attention/blob/dbabcc788590e793eee11566d7253906187e612e/flash_attn/cute/flash_fwd.py">flash_fwd.py</a>（sm80 路径）。</li>
+<li><strong>你要实现</strong>：<code>mine/g3_flash_attn.cu</code> 里的 KV 循环：S = QKᵀ、缩放到 log2 域并 mask、online softmax（含 O 的 rescale）、P·V，以及最后 l 的 quad 归约。Q fragment 的加载、ldmatrix（含 <code>.trans</code>）、mma、<code>pack_bf16</code>、<code>load_rows</code>、写回 O 和 LSE、host 端都已给出。</li>
+<li><strong>环境</strong>：默认 RTX 5090；任何 sm_80+。head_dim 64 或 128，Q / K / V 形状 (B, H, N, D) 相同，BF16。</li>
+<li><strong>难点在这几条规则</strong>：
+<ol>
+<li>一个 CTA = 一个 (batch·head, 64 个 query)，4 个 warp 各 16 行；每个 warp 看全部 key（FA2 的分法，不需要 warp 间归约）。</li>
+<li>每个线程持有第 g、g+8 两行；一行的 64 个 S 分布在一个 quad 的 4 个线程上 → <code>__shfl_xor_sync</code> 1 和 2。</li>
+<li>P 的 C fragment 直接打包成 A fragment：k16 步 kk 用 n8 tile <code>2kk</code> 和 <code>2kk+1</code>（A2 的“行对齐”）。</li>
+<li>V 是 [key][d]（K×N、n 连续）：B 操作数要用 <code>ldmatrix.trans</code>。</li>
+<li>causal：KV 块只扫到对角线；只有对角线块逐元素 mask；尾部 key（≥ N）总是 mask。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：D = 64 / 128 × N = 64 / 128 / 200 / 1000 × causal / 非 causal 的 O 和 LSE · 长度 1、7、63、65 · causal 第一行 = V 的第一行 · 放大 8 倍的分数不溢出 · 自定义 scale · 不支持的 head_dim 报错。</p>
+<h2 id="g3-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 4 个记账员，每人管 16 个客户</div><p>一个 CTA 是一个小账房，4 个记账员（warp）每人管 16 个客户（query 行）。每一批新到的交易记录（64 个 key 的 K、V）放在公共桌上（SMEM）。记账员先用计算器（mma）算出自己 16 个客户对这 64 笔交易的打分（S），然后按 D1 的“换汇率”规则更新每个客户的账：同一行的数据分在 4 个助手（quad 的 4 个线程）手里，助手之间喊两嗓子（两次 shuffle）就知道这一行的最大值。最妙的一步：打分表（S 的 C 布局）和下一次计算要的输入格式（A 布局）恰好对得上，直接把 float 压成 bf16 就能拿去算 P·V，一张纸都不用往桌上放。</p>
+</div>
+<h2 id="g3-3">图解：一个 warp 处理一个 KV 块</h2>
+
+<figure class="flow"><div class="flow-head">16 行 query × 64 个 key<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;16 行 query × 64 个 key&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;q&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;qf[D/16][4]&quot;, &quot;s&quot;: &quot;Q fragment，常驻&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;k&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;sK [key][d]&quot;, &quot;s&quot;: &quot;ldmatrix（非转置）&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;s[8][4]&quot;, &quot;s&quot;: &quot;S，C 布局&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;sm&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;online softmax&quot;, &quot;s&quot;: &quot;quad shuffle × 2&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;p&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;pa[4]&quot;, &quot;s&quot;: &quot;bf16，A 布局&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;v&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.4, &quot;t&quot;: &quot;sV [key][d]&quot;, &quot;s&quot;: &quot;ldmatrix.trans&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;o&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.4, &quot;t&quot;: &quot;o[D/8][4]&quot;, &quot;s&quot;: &quot;O 累加器&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;q&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;k&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;s&quot;, &quot;b&quot;: &quot;sm&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;sm&quot;, &quot;b&quot;: &quot;p&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;p:b&quot;, &quot;b&quot;: &quot;o:t&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;v&quot;, &quot;b&quot;: &quot;o&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 168.0}}"></div><figcaption>寄存器预算（D = 128）：qf 32 个、s 32 个、o 64 个、m / l 4 个，再加地址，每线程 ~150 个寄存器，128 线程的 CTA。</figcaption></figure>
+<h2 id="g3-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 一个 KV 块（64 个 key），一个 warp，D = 64</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;mm1&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;S = QKᵀ&quot;, &quot;s&quot;: &quot;4 kd × 4 nj × 2 mma&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;msk&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;× scale·log2e&quot;, &quot;s&quot;: &quot;mask → −inf&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;soft&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;max / α / exp2 / l&quot;, &quot;s&quot;: &quot;每线程 2 行&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;mm2&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;O += P V&quot;, &quot;s&quot;: &quot;4 kk × 4 nd × 2 mma&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;mm1&quot;, &quot;b&quot;: &quot;msk&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;msk&quot;, &quot;b&quot;: &quot;soft&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;soft&quot;, &quot;b&quot;: &quot;mm2&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 180.0, &quot;rh&quot;: 90.0, &quot;nw&quot;: 150.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="mm1"><div class="step-title">1. S = QKᵀ</div><p>D = 64：4 个 k16 步（kd）× 4 次 <code>ldmatrix_x4</code>（每次 2 个 n8）× 2 次 mma = 32 条 mma，得到 <code>s[8][4]</code>：每个线程 8 个 n8 tile × 4 个元素。</p>
+</div><div class="step" data-hl="msk"><div class="step-title">2. 缩放和 mask</div><p>乘 <code>scale_log2 = scale · log2 e</code>，之后全部用 <code>exp2f</code>。元素 (ni, e) 的 key = <code>k0 + 8ni + 2t + (e&amp;1)</code>，query = <code>q0 + 16warp + g + 8(e&gt;&gt;1)</code>。key ≥ N 或（对角线块上）key &gt; query → −inf。</p>
+</div><div class="step" data-hl="soft"><div class="step-title">3. online softmax</div><p>对 h = 0、1（行 g、g+8）：本线程 16 个值取 max，<code>__shfl_xor_sync(…, 1)</code>、<code>(…, 2)</code> 得到整行 max；<code>α = exp2(m_old − m_new)</code>；<code>s = exp2(s − m_new)</code>；<code>l = α·l + Σs</code>（l 只是本线程的部分和，最后再 quad 归约）；O 的第 h 行乘 α。</p>
+</div><div class="step" data-hl="mm2"><div class="step-title">4. O += P V</div><p>k16 步 kk：<code>pa = {pack(s[2kk][0,1]), pack(s[2kk][2,3]), pack(s[2kk+1][0,1]), pack(s[2kk+1][2,3])}</code>；V 用 <code>ldmatrix_x4_trans</code>，地址行 = <code>16kk + (l%8) + 8((l/8)%2)</code>、列 = <code>16nd + 8(l/16)</code>，寄存器 {0,1} 给 n8 tile 2nd，{2,3} 给 2nd+1。</p>
+</div></div></div>
+<p>5090 上的速度（参考解，B = 4、H = 16，对比 PyTorch SDPA）：</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>N</th>
+<th>D</th>
+<th>causal</th>
+<th>本题 TF/s</th>
+<th>SDPA TF/s</th>
+<th>比值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1024</td>
+<td>64</td>
+<td>否</td>
+<td>139.7</td>
+<td>162.2</td>
+<td>0.86</td>
+</tr>
+<tr>
+<td>4096</td>
+<td>64</td>
+<td>否</td>
+<td>113.5</td>
+<td>211.5</td>
+<td>0.54</td>
+</tr>
+<tr>
+<td>8192</td>
+<td>128</td>
+<td>否</td>
+<td>121.8</td>
+<td>208.0</td>
+<td>0.59</td>
+</tr>
+<tr>
+<td>8192</td>
+<td>128</td>
+<td>是</td>
+<td>129.4</td>
+<td>203.1</td>
+<td>0.64</td>
+</tr>
+</tbody>
+</table></div>
+<p>差距主要在 K/V 是同步加载的：等 global load 时 Tensor Core 闲着。把 G2 的 cp.async 双缓冲用到 K/V 上，是下一步最值钱的扩展。</p>
+<h2 id="g3-5">易错点</h2>
+<ul>
+<li><strong>只在一个线程里求行最大值。</strong> 一行分布在 quad 的 4 个线程上，必须 shuffle 两次；少一次结果偶尔对（max 碰巧在本线程）大多不对。</li>
+<li><strong>l 在每块都做 quad 归约。</strong> 正确但浪费；而且如果每块都归约，最后就不能再归约一次（会重复相加）。参考解只在最后归约一次。</li>
+<li><strong>第一块的 α。</strong> m_old = −inf：<code>exp2(−inf − m)</code> = 0 正确；但如果整行都是 −inf（m_new 也是 −inf），要用 0 做基准，否则 NaN（<code>test_tiny_and_odd_lengths</code> 里 N = 1、7 的 padding 行会触发）。</li>
+<li><strong>V 用了非转置 ldmatrix。</strong> 结果是 P·Vᵀ 的某种乱序；<code>test_matches_reference</code> 立刻失败。</li>
+<li><strong>causal 判断写成 <code>key &gt;= query</code>。</strong> 对角线自己要保留：<code>test_first_causal_row_copies_first_value</code> 检查第一行输出等于 V 的第一行。</li>
+<li><strong>每个 KV 块开头少了 <code>__syncthreads</code>。</strong> 上一块的 sV 还有 warp 在读，就被下一块覆盖。</li>
+</ul>
+<h2 id="g3-6">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 示例与关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">q, k, v = (torch.randn(2, 3, 200, 64, device=&quot;cuda&quot;, dtype=torch.bfloat16) for _ in range(3))
+o, lse = flash_attn(q, k, v, causal=True)    # o: (2,3,200,64) bf16, lse: (2,3,200) fp32
+# o ≈ softmax(q kᵀ / 8 + causal mask) v；lse ≈ logsumexp(q kᵀ / 8 + mask)
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>线程 (warp, lane) 的 <code>s[ni][e]</code> 对应哪个 query、哪个 key？</li>
+<li>为什么 P 可以不经过 SMEM 直接做 A 操作数？V 为什么不行？</li>
+<li>causal 时一个 Q 块要扫几个 KV 块？哪一块要 mask？</li>
+<li>LSE 怎么从 log2 域的 m 和 l 算出来？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><pre><code class="language-cuda">const int n_blocks = causal ? min(ceil(N/BC), ceil((q0+BR)/BC)) : ceil(N/BC);
+for (jb ...) {
+  __syncthreads(); load_rows(sK ...); load_rows(sV ...); __syncthreads();
+  float s[BC/8][4] = {};
+  // S: for kd, for nj: ldmatrix_x4(sK + r*LD + kd*16 + 8*((lane/8)%2)), r = nj*16 + (lane%8) + 8*(lane/16)
+  // scale + mask
+  // for h in 0,1: row max (2 shuffles), base = (mx == -inf ? 0 : mx), alpha = exp2f(m[h] - base),
+  //               s = exp2f(s - base), l[h] = l[h]*alpha + rowsum, o[*][2h, 2h+1] *= alpha, m[h] = mx
+  // PV: pa from s, ldmatrix_x4_trans(sV + r*LD + c), 2 mma per nd
+}
+// l: two shuffles
+</code></pre>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>详解：答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>关键问题答案</summary><div class="body"><ol>
+<li>query = <code>q0 + 16·warp + g + 8·(e &gt;&gt; 1)</code>，key = <code>k0 + 8·ni + 2t + (e &amp; 1)</code>（A2 的 C 布局：c0、c1 在行 g，c2、c3 在行 g+8）。</li>
+<li>P 是 S 经过逐元素运算得到的，仍在 C 布局；C 布局和 A 布局按行对齐（A2 的 <code>test_c_layout_rows_match_a_layout_rows</code>），只要两两打包成 bf16。V 来自 SMEM，而且要作为 B 操作数（k = key 方向成对），V 存成 [key][d]，所以用转置的 ldmatrix。</li>
+<li><code>ceil((q0 + 64) / 64)</code> 个，最后一个（对角线块）要逐元素 mask；N 有尾巴时最后一块还要 mask key ≥ N。</li>
+<li>自然对数的 lse = ln Σ e^{x} = (m₂ + log₂ l)·ln 2，m₂ 是 log2 域的最大值（已经乘过 scale·log2 e）。</li>
+</ol>
+</div></details></div></details>
+<h2 id="g3-7">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/g3_flash_attn.cu<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/g3_flash_attn.cu</span><span class="muted small">239 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-cpp">// G3 · FlashAttention-2 forward with mma.sync on RTX 5090 (sm_120; also sm_80+)
+//
+// O = softmax(scale · Q Kᵀ [causal mask]) V   for bf16 Q, K, V of shape (B, H, N, D), D ∈ {64, 128}.
+// Also returns LSE (natural log, fp32, shape (B, H, N)), like flash_attn&#x27;s softmax_lse.
+//
+// One CTA = one (batch, head, 64-query block); 4 warps, each owns 16 query rows (FA2 split: no inter-warp
+// reduction needed because every warp sees all keys of its rows).
+// Per KV block of 64 keys:
+//   S  = Q Kᵀ        : Q fragments live in registers for the whole kernel (loaded once with ldmatrix),
+//                      K fragments come from SMEM ([key][d] = N×K layout, non-transposed ldmatrix as in G1)
+//   online softmax    : in the log2 domain on the C fragments (each thread owns rows g and g+8; a row is spread
+//                      over the 4 threads of a quad -&gt; reduce with __shfl_xor_sync(…, 1) and (…, 2))
+//   O += P V          : P is converted to bf16 and re-used directly as the A operand — the C layout of S and the
+//                      A layout of the next mma line up row by row (drill A2) — and V fragments come from SMEM
+//                      with ldmatrix.trans, because V is stored [key][d] (K×N, n contiguous).
+// Causal (square, top-left == bottom-right): KV blocks after the diagonal are never loaded; only the diagonal
+// block applies an element mask. Keys &gt;= N (tail) are masked; query rows &gt;= N are not written.
+// Loads are synchronous (uint4 + __syncthreads): the drill is the fragment-level math, not the pipeline (G2).
+#include &lt;torch/extension.h&gt;
+#include &lt;c10/cuda/CUDAStream.h&gt;
+#include &lt;c10/cuda/CUDAException.h&gt;
+#include &lt;cuda_bf16.h&gt;
+#include &lt;cstdint&gt;
+
+#define BR 64
+#define BC 64
+#define NWARPS 4
+
+// ---------------------------------------------------------------- given helpers
+__device__ __forceinline__ void ldmatrix_x4(uint32_t r[4], const void* smem) {
+  uint32_t a = static_cast&lt;uint32_t&gt;(__cvta_generic_to_shared(smem));
+  asm volatile(&quot;ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];\n&quot;
+               : &quot;=r&quot;(r[0]), &quot;=r&quot;(r[1]), &quot;=r&quot;(r[2]), &quot;=r&quot;(r[3]) : &quot;r&quot;(a));
+}
+__device__ __forceinline__ void ldmatrix_x4_trans(uint32_t r[4], const void* smem) {
+  uint32_t a = static_cast&lt;uint32_t&gt;(__cvta_generic_to_shared(smem));
+  asm volatile(&quot;ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 {%0, %1, %2, %3}, [%4];\n&quot;
+               : &quot;=r&quot;(r[0]), &quot;=r&quot;(r[1]), &quot;=r&quot;(r[2]), &quot;=r&quot;(r[3]) : &quot;r&quot;(a));
+}
+__device__ __forceinline__ void mma_16816(float d[4], const uint32_t a[4], const uint32_t b[2]) {
+  asm volatile(
+      &quot;mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 &quot;
+      &quot;{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%0, %1, %2, %3};\n&quot;
+      : &quot;+f&quot;(d[0]), &quot;+f&quot;(d[1]), &quot;+f&quot;(d[2]), &quot;+f&quot;(d[3])
+      : &quot;r&quot;(a[0]), &quot;r&quot;(a[1]), &quot;r&quot;(a[2]), &quot;r&quot;(a[3]), &quot;r&quot;(b[0]), &quot;r&quot;(b[1]));
+}
+// two fp32 -&gt; one b32 holding two bf16 (low half = first argument)
+__device__ __forceinline__ uint32_t pack_bf16(float lo, float hi) {
+  __nv_bfloat162 v = __floats2bfloat162_rn(lo, hi);
+  return *reinterpret_cast&lt;uint32_t*&gt;(&amp;v);
+}
+// rows x D tile from global (row stride D) into SMEM (row stride D + 8); rows &gt;= rows_left become zeros
+template &lt;int D&gt;
+__device__ __forceinline__ void load_rows(__nv_bfloat16* s, const __nv_bfloat16* g, int rows, int rows_left, int tid) {
+  constexpr int VPR = D / 8;               // 16-byte vectors per row
+  for (int v = tid; v &lt; rows * VPR; v += NWARPS * 32) {
+    int r = v / VPR, c = (v % VPR) * 8;
+    uint4 val = make_uint4(0, 0, 0, 0);
+    if (r &lt; rows_left) val = *reinterpret_cast&lt;const uint4*&gt;(g + (size_t)r * D + c);
+    *reinterpret_cast&lt;uint4*&gt;(s + r * (D + 8) + c) = val;
+  }
+}
+
+// ---------------------------------------------------------------- the kernel
+template &lt;int D&gt;
+__global__ void __launch_bounds__(NWARPS * 32) flash_fwd_kernel(const __nv_bfloat16* __restrict__ Q,
+                                                                const __nv_bfloat16* __restrict__ K,
+                                                                const __nv_bfloat16* __restrict__ V,
+                                                                __nv_bfloat16* __restrict__ O, float* __restrict__ LSE,
+                                                                int N, float scale_log2, bool causal) {
+  constexpr int LD = D + 8;                // padded SMEM row (bank-conflict-free ldmatrix, see A3)
+  extern __shared__ __align__(16) __nv_bfloat16 smem[];
+  __nv_bfloat16* sQ = smem;                // BR x LD
+  __nv_bfloat16* sK = sQ + BR * LD;        // BC x LD
+  __nv_bfloat16* sV = sK + BC * LD;        // BC x LD
+
+  const int tid = threadIdx.x, lane = tid % 32, warp = tid / 32;
+  const int g = lane / 4, t = lane % 4;
+  const int q0 = blockIdx.x * BR;
+  const size_t bh = (size_t)blockIdx.y * N * D;          // (batch, head) offset
+  const __nv_bfloat16* Qg = Q + bh;
+  const __nv_bfloat16* Kg = K + bh;
+  const __nv_bfloat16* Vg = V + bh;
+
+  // Q tile -&gt; SMEM -&gt; registers (A fragments for every k16 step of d), kept for the whole kernel
+  load_rows&lt;D&gt;(sQ, Qg + (size_t)q0 * D, BR, N - q0, tid);
+  __syncthreads();
+  uint32_t qf[D / 16][4];
+#pragma unroll
+  for (int kd = 0; kd &lt; D / 16; ++kd) {
+    int r = warp * 16 + (lane % 8) + 8 * ((lane / 8) % 2);
+    ldmatrix_x4(qf[kd], sQ + r * LD + kd * 16 + 8 * (lane / 16));
+  }
+
+  float o[D / 8][4] = {};                  // O accumulator: 16 rows x D per warp, C layout
+  float m[2] = {-INFINITY, -INFINITY};     // running max (log2 domain) of rows g and g+8
+  float l[2] = {0.f, 0.f};                 // running sum, per thread (partial over its columns)
+
+  // &gt;&gt;&gt; SOLUTION (KV loop: S = QKᵀ, mask, online softmax, O += P V; then the epilogue normalisation)
+  const int n_blocks = causal ? min((N + BC - 1) / BC, (q0 + BR + BC - 1) / BC) : (N + BC - 1) / BC;
+  for (int jb = 0; jb &lt; n_blocks; ++jb) {
+    const int k0 = jb * BC;
+    __syncthreads();                       // previous iteration is done reading sK / sV
+    load_rows&lt;D&gt;(sK, Kg + (size_t)k0 * D, BC, N - k0, tid);
+    load_rows&lt;D&gt;(sV, Vg + (size_t)k0 * D, BC, N - k0, tid);
+    __syncthreads();
+
+    // ---- S = Q Kᵀ : 16 x 64 per warp = 8 n8 tiles
+    float s[BC / 8][4] = {};
+#pragma unroll
+    for (int kd = 0; kd &lt; D / 16; ++kd) {
+#pragma unroll
+      for (int nj = 0; nj &lt; BC / 16; ++nj) {
+        uint32_t r4[4];
+        int r = nj * 16 + (lane % 8) + 8 * (lane / 16);
+        ldmatrix_x4(r4, sK + r * LD + kd * 16 + 8 * ((lane / 8) % 2));
+        uint32_t b0[2] = {r4[0], r4[1]}, b1[2] = {r4[2], r4[3]};
+        mma_16816(s[2 * nj], qf[kd], b0);
+        mma_16816(s[2 * nj + 1], qf[kd], b1);
+      }
+    }
+
+    // ---- scale into the log2 domain and mask (tail keys always, causal only on the diagonal block)
+    const bool diag = causal &amp;&amp; (k0 + BC &gt; q0);
+#pragma unroll
+    for (int ni = 0; ni &lt; BC / 8; ++ni)
+#pragma unroll
+      for (int e = 0; e &lt; 4; ++e) {
+        int key = k0 + ni * 8 + 2 * t + (e &amp; 1);
+        int qry = q0 + warp * 16 + g + 8 * (e &gt;&gt; 1);
+        bool dead = key &gt;= N || (diag &amp;&amp; key &gt; qry);
+        s[ni][e] = dead ? -INFINITY : s[ni][e] * scale_log2;
+      }
+
+    // ---- online softmax per row (h = 0: row g, h = 1: row g + 8)
+#pragma unroll
+    for (int h = 0; h &lt; 2; ++h) {
+      float mx = m[h];
+#pragma unroll
+      for (int ni = 0; ni &lt; BC / 8; ++ni) mx = fmaxf(mx, fmaxf(s[ni][2 * h], s[ni][2 * h + 1]));
+      mx = fmaxf(mx, __shfl_xor_sync(0xffffffff, mx, 1));   // the 4 threads of a quad share a row
+      mx = fmaxf(mx, __shfl_xor_sync(0xffffffff, mx, 2));
+      // a row that has seen only masked keys keeps m = -inf: use 0 as the base so exp2 never sees inf - inf
+      const float base = mx == -INFINITY ? 0.f : mx;
+      const float alpha = exp2f(m[h] - base);               // m[h] = -inf on the first block -&gt; alpha = 0
+      m[h] = mx;
+      float rs = 0.f;
+#pragma unroll
+      for (int ni = 0; ni &lt; BC / 8; ++ni) {
+        s[ni][2 * h] = exp2f(s[ni][2 * h] - base);
+        s[ni][2 * h + 1] = exp2f(s[ni][2 * h + 1] - base);
+        rs += s[ni][2 * h] + s[ni][2 * h + 1];
+      }
+      l[h] = l[h] * alpha + rs;                               // per-thread partial; quad-reduced at the end
+#pragma unroll
+      for (int nd = 0; nd &lt; D / 8; ++nd) {
+        o[nd][2 * h] *= alpha;
+        o[nd][2 * h + 1] *= alpha;
+      }
+    }
+
+    // ---- O += P V : P (C layout, fp32) -&gt; A fragments (bf16) without any shuffle
+#pragma unroll
+    for (int kk = 0; kk &lt; BC / 16; ++kk) {
+      uint32_t pa[4] = {pack_bf16(s[2 * kk][0], s[2 * kk][1]),           // row g,   keys 16kk + 2t, +1
+                        pack_bf16(s[2 * kk][2], s[2 * kk][3]),           // row g+8
+                        pack_bf16(s[2 * kk + 1][0], s[2 * kk + 1][1]),   // row g,   keys 16kk + 8 + 2t, +1
+                        pack_bf16(s[2 * kk + 1][2], s[2 * kk + 1][3])};  // row g+8
+#pragma unroll
+      for (int nd = 0; nd &lt; D / 16; ++nd) {
+        // V is [key][d]: transposed ldmatrix gives the B layout (pairs of consecutive keys per register).
+        // Matrices: (keys 0-7, d 0-7), (keys 8-15, d 0-7), (keys 0-7, d 8-15), (keys 8-15, d 8-15).
+        uint32_t r4[4];
+        int r = kk * 16 + (lane % 8) + 8 * ((lane / 8) % 2);
+        int c = nd * 16 + 8 * (lane / 16);
+        ldmatrix_x4_trans(r4, sV + r * LD + c);
+        uint32_t b0[2] = {r4[0], r4[1]}, b1[2] = {r4[2], r4[3]};
+        mma_16816(o[2 * nd], pa, b0);
+        mma_16816(o[2 * nd + 1], pa, b1);
+      }
+    }
+  }
+
+  // ---- epilogue: finish the row sums across the quad, normalise, write O and LSE
+#pragma unroll
+  for (int h = 0; h &lt; 2; ++h) {
+    l[h] += __shfl_xor_sync(0xffffffff, l[h], 1);
+    l[h] += __shfl_xor_sync(0xffffffff, l[h], 2);
+  }
+  // &lt;&lt;&lt; SOLUTION
+
+#pragma unroll
+  for (int h = 0; h &lt; 2; ++h) {
+    const int row = q0 + warp * 16 + g + 8 * h;
+    const float inv = l[h] &gt; 0.f ? 1.f / l[h] : 0.f;
+    if (row &lt; N) {
+#pragma unroll
+      for (int nd = 0; nd &lt; D / 8; ++nd) {
+        int col = nd * 8 + 2 * t;
+        *reinterpret_cast&lt;__nv_bfloat162*&gt;(O + bh + (size_t)row * D + col) =
+            __floats2bfloat162_rn(o[nd][2 * h] * inv, o[nd][2 * h + 1] * inv);
+      }
+      // m is in the log2 domain: lse = (m + log2 l) · ln 2
+      if (t == 0) LSE[(size_t)blockIdx.y * N + row] = l[h] &gt; 0.f ? (m[h] + log2f(l[h])) * 0.69314718056f : -INFINITY;
+    }
+  }
+}
+
+template &lt;int D&gt;
+void launch(const torch::Tensor&amp; q, const torch::Tensor&amp; k, const torch::Tensor&amp; v, torch::Tensor&amp; o,
+            torch::Tensor&amp; lse, int N, float scale_log2, bool causal) {
+  const int smem = (BR + 2 * BC) * (D + 8) * sizeof(__nv_bfloat16);
+  static bool attr = false;
+  if (!attr) {
+    C10_CUDA_CHECK(cudaFuncSetAttribute(flash_fwd_kernel&lt;D&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize, smem));
+    attr = true;
+  }
+  dim3 grid((N + BR - 1) / BR, q.size(0) * q.size(1));
+  flash_fwd_kernel&lt;D&gt;&lt;&lt;&lt;grid, NWARPS * 32, smem, c10::cuda::getCurrentCUDAStream()&gt;&gt;&gt;(
+      reinterpret_cast&lt;const __nv_bfloat16*&gt;(q.data_ptr()), reinterpret_cast&lt;const __nv_bfloat16*&gt;(k.data_ptr()),
+      reinterpret_cast&lt;const __nv_bfloat16*&gt;(v.data_ptr()), reinterpret_cast&lt;__nv_bfloat16*&gt;(o.data_ptr()),
+      lse.data_ptr&lt;float&gt;(), N, scale_log2, causal);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+std::vector&lt;torch::Tensor&gt; flash_attn_fwd(torch::Tensor q, torch::Tensor k, torch::Tensor v, bool causal,
+                                          double scale) {
+  TORCH_CHECK(q.is_cuda() &amp;&amp; q.dtype() == torch::kBFloat16 &amp;&amp; k.dtype() == q.dtype() &amp;&amp; v.dtype() == q.dtype());
+  TORCH_CHECK(q.dim() == 4 &amp;&amp; q.sizes() == k.sizes() &amp;&amp; q.sizes() == v.sizes(), &quot;q, k, v must all be (B, H, N, D)&quot;);
+  TORCH_CHECK(q.is_contiguous() &amp;&amp; k.is_contiguous() &amp;&amp; v.is_contiguous());
+  const int N = q.size(2), D = q.size(3);
+  auto o = torch::empty_like(q);
+  auto lse = torch::empty({q.size(0), q.size(1), N}, q.options().dtype(torch::kFloat32));
+  const float scale_log2 = static_cast&lt;float&gt;(scale) * 1.4426950408889634f;
+  if (D == 64) launch&lt;64&gt;(q, k, v, o, lse, N, scale_log2, causal);
+  else if (D == 128) launch&lt;128&gt;(q, k, v, o, lse, N, scale_log2, causal);
+  else TORCH_CHECK(false, &quot;head dim must be 64 or 128&quot;);
+  return {o, lse};
+}</code></pre></div></div></details>
+<p>Python 包装（<code>solutions/g3_flash_attn.py</code>）：</p>
+
+<div class="codebox"><div class="code-head"><span class="path">solutions/g3_flash_attn.py</span><span class="muted small">26 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;G3 · FlashAttention-2 forward with mma.sync on RTX 5090 — reference solution (Python wrapper; the work is in the .cu).
+
+Implement the KV loop in `mine/g3_flash_attn.cu` (between the TODO markers), then delete the line
+`#define DRILL_STUB`. Until then flash_attn raises NotImplementedError.
+
+- flash_attn(q, k, v, causal=False, scale=None) -&gt; (o, lse)
+  q, k, v: (B, H, N, D) bf16 contiguous CUDA tensors with the same shape, D = 64 or 128.
+  scale defaults to 1 / sqrt(D). o: (B, H, N, D) bf16 = softmax(scale·q kᵀ [causal]) v.
+  lse: (B, H, N) float32, natural-log log-sum-exp of the scaled scores of each row.
+  causal masks key j &gt; query i (square attention). N can be any length (tails are masked).
+
+Runs on any sm_80+ GPU; default target RTX 5090. Benchmark vs PyTorch SDPA: ./check.sh g3 --bench
+&quot;&quot;&quot;
+import math
+
+from common.cuda_ext import load_drill
+
+_DECLS = &quot;std::vector&lt;torch::Tensor&gt; flash_attn_fwd(torch::Tensor q, torch::Tensor k, torch::Tensor v, bool causal, double scale);&quot;
+
+
+def flash_attn(q, k, v, causal=False, scale=None):
+    &quot;&quot;&quot;(o, lse) from the FA2-style kernel in the .cu file next to this wrapper.&quot;&quot;&quot;
+    if scale is None:
+        scale = 1.0 / math.sqrt(q.shape[-1])
+    o, lse = load_drill(__file__, _DECLS, (&quot;flash_attn_fwd&quot;,)).flash_attn_fwd(q, k, v, causal, scale)
+    return o, lse</code></pre></div>
+<h2 id="g3-8">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li><strong>“FA2 真实代码比这里多了什么？”</strong> cp.async 双缓冲 K/V、swizzle 的 SMEM layout、按 <code>Is_even_MN</code> / <code>Is_even_K</code> 生成无判断的快路径、dropout、ALiBi、softcap、paged KV、varlen（cu_seqlens），以及更大的 Br（128）和 8 个 warp。</li>
+<li><strong>“反向怎么做？”</strong> 存下 LSE，反向重算 P = exp(S − lse)，再算 dV = Pᵀ dO、dP = dO Vᵀ、dS = P ∘ (dP − rowsum(dO ∘ O))、dQ = dS K、dK = dSᵀ Q。dQ 要跨 KV 块累加，FA2 用 atomicAdd 或单独的 dQ 累加 kernel。</li>
+<li><strong>“5090 上 FP8 attention？”</strong> sm120 有 FP8 的 <code>mma.sync</code>（k = 32），FA3 的 FP8 思路（Q、K 量化、P 用 FP8 做 PV）可以移植；SageAttention 是一个现成的例子。</li>
+<li><strong>“decode（N_q = 1）用这个 kernel 行吗？”</strong> 64 行的 Q 块只有 1 行有效，浪费 63/64 的 Tensor Core；decode 要用 split-KV（D1）+ 按 head 并行的专门 kernel（FlashDecoding、FlashInfer 的 decode）。</li>
+</ul>
+
+<nav class="pager"><a href="g2_multistage_gemm.html">← 上一题 G2</a><a href="g4_pdl_graph.html">G4 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#g3-1">题面速览</a>
+<a class="o2" href="#g3-2">直觉与类比</a>
+<a class="o2" href="#g3-3">图解：一个 warp 处理一个 KV 块</a>
+<a class="o2" href="#g3-4">逐步演示</a>
+<a class="o2" href="#g3-5">易错点</a>
+<a class="o2" href="#g3-6">三级提示</a>
+<a class="o2" href="#g3-7">参考解</a>
+<a class="o2" href="#g3-8">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>
